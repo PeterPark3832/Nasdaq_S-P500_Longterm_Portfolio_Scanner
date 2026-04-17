@@ -1,0 +1,21 @@
+# 환경변수 (절대 커밋 금지)
+.env
+
+# 런타임 생성 파일 (상태/캐시/로그)
+*.log
+portfolio_state_us.json
+last_rebal_us.json
+yf_info_cache.json
+performance_history.json
+lt_backtest_result.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db

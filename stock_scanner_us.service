@@ -1,0 +1,45 @@
+# =============================================
+# systemd 서비스 파일
+# 위치: /etc/systemd/system/stock_scanner_us.service
+# =============================================
+# 설치 방법:
+#   sudo cp stock_scanner_us.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable stock_scanner_us   ← 서버 재부팅 시 자동 시작
+#   sudo systemctl start stock_scanner_us    ← 즉시 시작
+#
+# 관리 명령어:
+#   sudo systemctl status stock_scanner_us   ← 상태 확인
+#   sudo systemctl stop stock_scanner_us     ← 중지
+#   sudo systemctl restart stock_scanner_us  ← 재시작
+#   journalctl -u stock_scanner_us -f        ← 실시간 로그
+# =============================================
+
+[Unit]
+Description=US Stock Long-term Portfolio Scanner v4.11
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# ── 아래 두 줄을 실제 경로로 수정하세요 ──────
+User=root
+WorkingDirectory=/root/swing_bot
+
+# 가상환경 사용 시: /root/swing_bot/venv/bin/python
+ExecStart=/root/swing_bot/venv/bin/python /root/swing_bot/longterm_scanner_v4.11.py
+
+# 크래시 시 10초 후 자동 재시작
+Restart=always
+RestartSec=10
+
+# 환경변수 파일 경로
+EnvironmentFile=/root/swing_bot/.env
+
+# 로그 설정 (journalctl로도 확인 가능)
+StandardOutput=append:/root/swing_bot/longterm_scanner_us.log
+StandardError=append:/root/swing_bot/longterm_scanner_us.log
+
+[Install]
+WantedBy=multi-user.target
