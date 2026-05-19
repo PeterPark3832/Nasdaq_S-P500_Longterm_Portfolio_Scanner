@@ -1,0 +1,15 @@
+[Unit]
+Description=US Portfolio Scanner Dashboard
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/us_longterm_bot
+EnvironmentFile=/root/us_longterm_bot/.env
+ExecStart=/root/us_longterm_bot/venv/bin/python /root/us_longterm_bot/dashboard.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
