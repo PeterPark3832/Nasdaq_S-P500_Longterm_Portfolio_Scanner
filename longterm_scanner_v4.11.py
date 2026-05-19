@@ -276,7 +276,7 @@ STRATEGY = {
     # 성과 이력 내 포트폴리오 가중 수익률 고점 대비 낙폭이 이 값 이하이면 경보
     "mdd_alert_threshold": -15.0,  # 고점 대비 낙폭 임계값 (%)
     # 5-1. 성과 이력 보존 건수
-    "perf_history_keep":    24,    # 최대 보존 건수 (월 1~2회 기록 → 약 1~2년치)
+    "perf_history_keep":    500,   # 최대 보존 건수 (일별 기록 → 약 2년치)
 
     # ── [v4.10] Stage 7 인트라월 드리프트 파라미터 ──────────
     # 리밸런싱 이후 개별 종목 비중이 목표 비중 대비 이 값 이상 벗어나면 경보
@@ -1665,15 +1665,11 @@ def _do_monthly_scan() -> None:
 
 
 # ══════════════════════════════════════════
-# 성과 점검 (매월 15일)
+# 성과 점검 (매일 장 종료 후)
 # ══════════════════════════════════════════
 def job_performance_check() -> None:
     now = datetime.now(KST)
-    if now.weekday() >= 5:
-        return
-    is_15th = (now.day == 15)
-    is_monday_after_15th_weekend = (now.weekday() == 0 and now.day in (16, 17))
-    if not (is_15th or is_monday_after_15th_weekend):
+    if now.weekday() >= 5:  # 주말 제외
         return
     portfolio = load_portfolio()
     if not portfolio:
@@ -2273,12 +2269,12 @@ def job_daily_rebal_check() -> None:
 # ══════════════════════════════════════════
 if __name__ == "__main__":
     schedule.every().day.at("07:00", "Asia/Seoul").do(job_heartbeat)
-    schedule.every().day.at("07:00", "Asia/Seoul").do(job_performance_check)  # 15일에만 실제 실행
+    schedule.every().day.at("07:00", "Asia/Seoul").do(job_performance_check)  # 매 평일 실행 (장 종료 후)
     schedule.every().day.at("07:10", "Asia/Seoul").do(job_daily_rebal_check)  # 한국 봇(08:50~09:10)과 충돌 회피
 
     log.info("✅ 미국주식 장기 투자 스캐너 v4.11 시작")
     log.info(f"  전략: D 혼합 / 상위 {STRATEGY['portfolio_size']}종목 / 현금 {STRATEGY['safe_asset_weight']}%")
-    log.info("  ⏰ 07:00 Heartbeat + 성과 점검(15일) — 전날 미국 장 종가 기준")
+    log.info("  ⏰ 07:00 Heartbeat + 성과 점검(매일) — 전날 미국 장 종가 기준")
     log.info("  ⏰ 07:10 리밸런싱 체크 (한국 봇과 시간 분산)")
     log.info(f"  📝 로그: {LOG_FILE}")
 
