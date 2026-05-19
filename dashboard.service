@@ -1,0 +1,19 @@
+[Unit]
+Description=US Portfolio Scanner Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/swing_bot
+ExecStart=/root/swing_bot/venv/bin/streamlit run dashboard.py \
+    --server.port 8502 \
+    --server.address 0.0.0.0 \
+    --server.headless true \
+    --browser.gatherUsageStats false
+Restart=always
+RestartSec=10
+EnvironmentFile=/root/swing_bot/.env
+
+[Install]
+WantedBy=multi-user.target

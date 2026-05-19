@@ -296,6 +296,7 @@ STRATEGY = {
 # 파일 경로
 # ==========================================
 PORTFOLIO_FILE          = Path("portfolio_state_us.json")
+PORTFOLIO_PREV_FILE     = Path("portfolio_prev_us.json")   # [dashboard] 리밸런싱 직전 이전 포트폴리오
 LAST_REBAL_FILE         = Path("last_rebal_us.json")
 INFO_CACHE_FILE         = Path("yf_info_cache.json")         # 재무 캐시 (재시작 시 재활용)
 UNIVERSE_SNAPSHOT_DIR   = Path("universe_snapshots")         # [v4.4] 월별 유니버스 스냅샷 디렉터리
@@ -1639,6 +1640,12 @@ def _do_monthly_scan() -> None:
 
         # 재무 캐시 저장 (다음 실행 시 재활용)
         _save_info_cache()
+
+        # [dashboard] 이전 포트폴리오 백업 — 대시보드 리밸런싱 비교용
+        if prev_portfolio and prev_portfolio.get("holdings"):
+            PORTFOLIO_PREV_FILE.write_text(
+                json.dumps(prev_portfolio, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
 
         save_portfolio({
             "month":                now_month,
