@@ -478,15 +478,26 @@ function renderPerfChart(canvasId,key){
     allRecs.filter(r=>r.type!=='rebalancing'&&r.portfolio_ret_pct!=null),
     RANGE[key]||'ALL'
   );
+  if(!perfRecs.length){
+    if(CHS[key])CHS[key].destroy();
+    delete CHS[key]; return;
+  }
 
-  // 리밸런싱 마커 (차트 범위 내 것만)
-  const firstDate=perfRecs[0]?.date||'';
+  const firstDate=perfRecs[0].date;
+  const lastDate=perfRecs[perfRecs.length-1].date;
+
+  // 리밸런싱 날짜를 labels에 포함시켜 순서 보장 (데이터는 null)
+  const rebalInRange=rebalDates.filter(d=>d>firstDate&&d<lastDate);
+  const allDates=[...new Set([...perfRecs.map(r=>r.date),...rebalInRange])].sort();
+  const perfMap=Object.fromEntries(perfRecs.map(r=>[r.date,r]));
+
+  // 리밸런싱 마커 — 이제 allDates 안에 있으므로 위치 정확
   const annotations={};
-  rebalDates.filter(d=>d>=firstDate).forEach((d,i)=>{
+  rebalInRange.forEach((d,i)=>{
     annotations['reb'+i]={
-      type:'line', xMin:d, xMax:d,
-      borderColor:'rgba(99,102,241,0.5)',
-      borderWidth:1.5, borderDash:[4,4],
+      type:'line',xMin:d,xMax:d,
+      borderColor:'rgba(99,102,241,0.55)',
+      borderWidth:1.5,borderDash:[4,4],
       label:{display:true,content:'리밸',position:'start',
         font:{size:9,weight:'bold'},color:'#818cf8',
         backgroundColor:'rgba(99,102,241,0.12)',
@@ -495,26 +506,30 @@ function renderPerfChart(canvasId,key){
   });
 
   if(CHS[key])CHS[key].destroy();
+  const big=allDates.length>60;
   CHS[key]=new Chart(ctx,{
     type:'line',
-    data:{labels:perfRecs.map(r=>r.date),datasets:[
-      {label:'포트폴리오',data:perfRecs.map(r=>r.portfolio_ret_pct),
+    data:{labels:allDates,datasets:[
+      {label:'포트폴리오',
+       data:allDates.map(d=>perfMap[d]?.portfolio_ret_pct??null),
        borderColor:'#00C6A9',backgroundColor:'rgba(0,198,169,.1)',
-       borderWidth:2.5,pointRadius:perfRecs.length>60?0:5,fill:true,tension:.3},
-      {label:'SPY',data:perfRecs.map(r=>r.spy_ret_pct),
+       borderWidth:2.5,pointRadius:big?0:5,fill:true,tension:.3,spanGaps:false},
+      {label:'SPY',
+       data:allDates.map(d=>perfMap[d]?.spy_ret_pct??null),
        borderColor:'#6366f1',backgroundColor:'transparent',
-       borderWidth:1.5,borderDash:[6,3],pointRadius:perfRecs.length>60?0:4,tension:.3},
-      {label:'QQQ',data:perfRecs.map(r=>r.qqq_ret_pct),
+       borderWidth:1.5,borderDash:[6,3],pointRadius:big?0:4,tension:.3,spanGaps:false},
+      {label:'QQQ',
+       data:allDates.map(d=>perfMap[d]?.qqq_ret_pct??null),
        borderColor:'#f59e0b',backgroundColor:'transparent',
-       borderWidth:1.5,borderDash:[3,3],pointRadius:perfRecs.length>60?0:4,tension:.3},
+       borderWidth:1.5,borderDash:[3,3],pointRadius:big?0:4,tension:.3,spanGaps:false},
     ]},
     options:{
       responsive:true,
       plugins:{
         legend:{labels:{color:'#94a3b8',font:{size:12}}},
-        tooltip:{mode:'index',intersect:false,callbacks:{
-          label:c=>` ${c.dataset.label}: ${c.raw!=null?c.raw.toFixed(2)+'%':'—'}`
-        }},
+        tooltip:{mode:'index',intersect:false,
+          filter:i=>i.raw!=null,
+          callbacks:{label:c=>` ${c.dataset.label}: ${c.raw!=null?c.raw.toFixed(2)+'%':'—'}`}},
         annotation:{annotations}
       },
       scales:{
