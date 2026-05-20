@@ -48,6 +48,7 @@ MAIN = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <title>US Portfolio Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <style>
 :root{
   --bg:#0B0E17; --s1:#131820; --s2:#1B2236; --bd:#1E2840;
@@ -176,6 +177,38 @@ tr:last-child td{border-bottom:none}
   border-radius:50%;animation:spin .8s linear infinite;margin:60px auto 12px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* ── CHART FILTER BUTTONS ── */
+.cf{display:flex;align-items:center;gap:6px;margin-bottom:14px}
+.cf-label{font-size:11px;color:var(--mu);margin-right:4px}
+.cfbtn{padding:4px 12px;border-radius:6px;border:1px solid var(--bd);
+  background:transparent;color:var(--mu);font-size:12px;font-weight:600;
+  cursor:pointer;transition:all .15s}
+.cfbtn.on{background:var(--pr);color:#fff;border-color:var(--pr)}
+.cfbtn:hover:not(.on){background:var(--s2);color:var(--tx)}
+
+/* ── MOBILE HOLDING CARDS ── */
+.mcards{display:none}
+.mcard{background:var(--s2);border:1px solid var(--bd);border-radius:12px;
+  padding:14px 16px;margin-bottom:10px}
+.mcard-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.mcard-ticker{font-size:17px;font-weight:800;color:var(--pr)}
+.mcard-name{font-size:11px;color:var(--mu);margin-top:2px;
+  max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcard-score{text-align:right}
+.mcard-score-val{font-size:17px;font-weight:800}
+.mcard-score-lbl{font-size:10px;color:var(--mu)}
+.mcard-wbar{margin-bottom:12px}
+.mcard-wbar-label{display:flex;justify-content:space-between;font-size:11px;
+  color:var(--mu);margin-bottom:4px}
+.mcard-wbar-pct{font-weight:700;color:var(--tx)}
+.mcard-wbg{height:6px;border-radius:3px;background:var(--bd);overflow:hidden}
+.mcard-wbf{height:6px;border-radius:3px;background:var(--pr)}
+.mcard-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.mcard-item label{font-size:10px;color:var(--mu);display:block;margin-bottom:3px}
+.mcard-item span{font-size:13px;font-weight:600}
+.mcard-badge{display:inline-block;padding:2px 8px;border-radius:20px;
+  font-size:10px;font-weight:600;background:rgba(99,102,241,.12);color:var(--bl)}
+
 /* ── RESPONSIVE ── */
 @media(max-width:768px){
   .tabs,.clock{display:none}
@@ -187,6 +220,8 @@ tr:last-child td{border-bottom:none}
   .g2,.g3{grid-template-columns:1fr}
   th,td{padding:8px 10px}
   table{font-size:12px}
+  .desk-tbl{display:none}
+  .mcards{display:block}
 }
 @media(max-width:420px){
   .kpis{grid-template-columns:1fr 1fr}
@@ -223,11 +258,19 @@ tr:last-child td{border-bottom:none}
     <div class="kpis" id="kpis"></div>
     <div class="cc">
       <div class="ctitle">성과 추이 — 포트폴리오 vs SPY vs QQQ</div>
+      <div class="cf">
+        <span class="cf-label">기간</span>
+        <button class="cfbtn" onclick="setRange('1M','home')">1M</button>
+        <button class="cfbtn" onclick="setRange('3M','home')">3M</button>
+        <button class="cfbtn" onclick="setRange('6M','home')">6M</button>
+        <button class="cfbtn on" id="cfbtn-home-ALL" onclick="setRange('ALL','home')">ALL</button>
+      </div>
       <canvas id="ch-home" height="200"></canvas>
     </div>
     <div class="card">
       <div class="ctitle">보유 종목</div>
-      <div class="tw" id="home-tbl"></div>
+      <div class="desk-tbl tw" id="home-tbl"></div>
+      <div class="mcards" id="home-cards"></div>
     </div>
   </div>
 
@@ -246,7 +289,8 @@ tr:last-child td{border-bottom:none}
     </div>
     <div class="card">
       <div class="ctitle">보유 종목 상세</div>
-      <div class="tw" id="port-tbl"></div>
+      <div class="desk-tbl tw" id="port-tbl"></div>
+      <div class="mcards" id="port-cards"></div>
     </div>
   </div>
 
@@ -255,6 +299,13 @@ tr:last-child td{border-bottom:none}
     <div class="hrow"><div class="htitle">성과 분석</div></div>
     <div class="cc">
       <div class="ctitle">누적 수익률 추이</div>
+      <div class="cf">
+        <span class="cf-label">기간</span>
+        <button class="cfbtn" onclick="setRange('1M','perf')">1M</button>
+        <button class="cfbtn" onclick="setRange('3M','perf')">3M</button>
+        <button class="cfbtn" onclick="setRange('6M','perf')">6M</button>
+        <button class="cfbtn on" id="cfbtn-perf-ALL" onclick="setRange('ALL','perf')">ALL</button>
+      </div>
       <canvas id="ch-perf" height="220"></canvas>
     </div>
     <div class="g3" id="perf-kpis"></div>
@@ -314,7 +365,7 @@ const SCOL = {
   'Financials':'#3b82f6','Industrials':'#8b5cf6',
   'Cash':'#374151','Unknown':'#94a3b8'
 };
-let D=null, CHS={};
+let D=null, CHS={}, RANGE={home:'ALL',perf:'ALL'};
 
 const fp=(v,s=true)=>v==null||isNaN(v)?'—':(s&&v>0?'+':'')+v.toFixed(2)+'%';
 const fm=v=>v==null?'—':'$'+v.toFixed(2);
@@ -334,9 +385,9 @@ function go(name){
   document.querySelectorAll('.tab,.mnavitem').forEach(e=>e.classList.remove('on'));
   document.getElementById('s-'+name).classList.add('on');
   document.querySelectorAll('[onclick="go(\''+name+'\')"]').forEach(e=>e.classList.add('on'));
-  if(name==='port'  && !CHS.sector) renderSector();
-  if(name==='perf'  && !CHS.perf)   renderPerfChart('ch-perf','perf');
-  if(name==='risk'  && !CHS.score)  renderScore();
+  if(name==='port' && !CHS.sector) renderSector();
+  if(name==='perf' && !CHS.perf)  renderPerfChart('ch-perf','perf');
+  if(name==='risk' && !CHS.score) renderScore();
 }
 
 async function load(){
@@ -386,7 +437,9 @@ function render(){
   ).join('');
 
   renderTable('home-tbl', holdings, false);
+  renderCards('home-cards', holdings);
   renderTable('port-tbl', holdings, true);
+  renderCards('port-cards', holdings);
   renderSectorList(holdings);
   renderPerfKPIs(checks);
   renderPerfHistTable(recs);
@@ -394,32 +447,137 @@ function render(){
   renderPerfChart('ch-home','home');
 }
 
+/* ── DATE FILTER ── */
+function filterByRange(recs, range){
+  if(range==='ALL') return recs;
+  const now=new Date();
+  const days={'1M':30,'3M':90,'6M':180}[range]||9999;
+  const cutoff=new Date(now.getTime()-days*864e5);
+  return recs.filter(r=>new Date(r.date)>=cutoff);
+}
+
+function setRange(range, key){
+  RANGE[key]=range;
+  ['1M','3M','6M','ALL'].forEach(r=>{
+    const btn=document.getElementById(`cfbtn-${key}-${r}`);
+    if(btn) btn.classList.toggle('on', r===range);
+  });
+  delete CHS[key];
+  renderPerfChart('ch-'+key, key);
+}
+
 /* ── LINE CHART ── */
 function renderPerfChart(canvasId,key){
   if(!D)return;
   const ctx=document.getElementById(canvasId);
   if(!ctx)return;
-  const recs=(D.performance.records||[]).filter(r=>r.type!=='rebalancing'&&r.portfolio_ret_pct!=null);
-  const labels=recs.map(r=>r.date);
+
+  const allRecs=D.performance.records||[];
+  const rebalDates=allRecs.filter(r=>r.type==='rebalancing').map(r=>r.date);
+  const perfRecs=filterByRange(
+    allRecs.filter(r=>r.type!=='rebalancing'&&r.portfolio_ret_pct!=null),
+    RANGE[key]||'ALL'
+  );
+
+  // 리밸런싱 마커 (차트 범위 내 것만)
+  const firstDate=perfRecs[0]?.date||'';
+  const annotations={};
+  rebalDates.filter(d=>d>=firstDate).forEach((d,i)=>{
+    annotations['reb'+i]={
+      type:'line', xMin:d, xMax:d,
+      borderColor:'rgba(99,102,241,0.5)',
+      borderWidth:1.5, borderDash:[4,4],
+      label:{display:true,content:'리밸',position:'start',
+        font:{size:9,weight:'bold'},color:'#818cf8',
+        backgroundColor:'rgba(99,102,241,0.12)',
+        padding:{x:4,y:2},yAdjust:-4}
+    };
+  });
+
   if(CHS[key])CHS[key].destroy();
   CHS[key]=new Chart(ctx,{
     type:'line',
-    data:{labels,datasets:[
-      {label:'포트폴리오',data:recs.map(r=>r.portfolio_ret_pct),
+    data:{labels:perfRecs.map(r=>r.date),datasets:[
+      {label:'포트폴리오',data:perfRecs.map(r=>r.portfolio_ret_pct),
        borderColor:'#00C6A9',backgroundColor:'rgba(0,198,169,.1)',
-       borderWidth:2.5,pointRadius:6,fill:true,tension:.3},
-      {label:'SPY',data:recs.map(r=>r.spy_ret_pct),
+       borderWidth:2.5,pointRadius:perfRecs.length>60?0:5,fill:true,tension:.3},
+      {label:'SPY',data:perfRecs.map(r=>r.spy_ret_pct),
        borderColor:'#6366f1',backgroundColor:'transparent',
-       borderWidth:2,borderDash:[6,3],pointRadius:4,tension:.3},
-      {label:'QQQ',data:recs.map(r=>r.qqq_ret_pct),
+       borderWidth:1.5,borderDash:[6,3],pointRadius:perfRecs.length>60?0:4,tension:.3},
+      {label:'QQQ',data:perfRecs.map(r=>r.qqq_ret_pct),
        borderColor:'#f59e0b',backgroundColor:'transparent',
-       borderWidth:2,borderDash:[3,3],pointRadius:4,tension:.3},
+       borderWidth:1.5,borderDash:[3,3],pointRadius:perfRecs.length>60?0:4,tension:.3},
     ]},
-    options:{...chartOpts(),scales:{
-      x:{ticks:{color:'#64748b'},grid:{color:'#1E2840'}},
-      y:{ticks:{color:'#64748b',callback:v=>v+'%'},grid:{color:'#1E2840'}}
-    }}
+    options:{
+      responsive:true,
+      plugins:{
+        legend:{labels:{color:'#94a3b8',font:{size:12}}},
+        tooltip:{mode:'index',intersect:false,callbacks:{
+          label:c=>` ${c.dataset.label}: ${c.raw!=null?c.raw.toFixed(2)+'%':'—'}`
+        }},
+        annotation:{annotations}
+      },
+      scales:{
+        x:{ticks:{color:'#64748b',maxTicksLimit:8},grid:{color:'#1E2840'}},
+        y:{ticks:{color:'#64748b',callback:v=>v+'%'},grid:{color:'#1E2840'}}
+      }
+    }
   });
+}
+
+/* ── MOBILE HOLDING CARDS ── */
+function renderCards(id, holdings){
+  const el=document.getElementById(id);
+  if(!el)return;
+  const stocks=holdings.filter(h=>h.ticker!=='CASH');
+  el.innerHTML=stocks.map(h=>{
+    const stcl=h.score>=80?'pos':h.score>=60?'neu':'neg';
+    const wPct=Math.min(h.weight/15*100,100);
+    return`<div class="mcard">
+      <div class="mcard-head">
+        <div>
+          <div class="mcard-ticker">${h.ticker}</div>
+          <div class="mcard-name">${h.name}</div>
+        </div>
+        <div class="mcard-score">
+          <div class="mcard-score-val ${stcl}">${h.score?h.score.toFixed(1):'—'}</div>
+          <div class="mcard-score-lbl">스코어</div>
+        </div>
+      </div>
+      <div class="mcard-wbar">
+        <div class="mcard-wbar-label">
+          <span>비중</span><span class="mcard-wbar-pct">${h.weight.toFixed(1)}%</span>
+        </div>
+        <div class="mcard-wbg"><div class="mcard-wbf" style="width:${wPct}%"></div></div>
+      </div>
+      <div class="mcard-grid">
+        <div class="mcard-item">
+          <label>섹터</label>
+          <span><span class="mcard-badge">${(h.sector||'—').replace('Communication Services','Comm.')}</span></span>
+        </div>
+        <div class="mcard-item">
+          <label>진입가</label>
+          <span style="color:var(--mu)">${fm(h.entry_price)}</span>
+        </div>
+        <div class="mcard-item">
+          <label>ROE</label>
+          <span class="${fc(h.roe)}">${h.roe?h.roe.toFixed(1)+'%':'—'}</span>
+        </div>
+        <div class="mcard-item">
+          <label>6M수익</label>
+          <span class="${fc(h.ret_6m)}">${h.ret_6m?fp(h.ret_6m):'—'}</span>
+        </div>
+        <div class="mcard-item">
+          <label>순이익률</label>
+          <span>${h.margin?h.margin.toFixed(1)+'%':'—'}</span>
+        </div>
+        <div class="mcard-item">
+          <label>52W위치</label>
+          <span>${h.w52_pos?h.w52_pos.toFixed(1)+'%':'—'}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 /* ── SECTOR DONUT ── */
