@@ -503,14 +503,16 @@ def send_telegram(text: str, topic_id: int | None = None) -> None:
 
 
 def send_telegram_chunks(text: str, topic_id: int | None = None) -> None:
-    if len(text) <= 4000:
+    # [v4.11.1] bytes 기준 Telegram 4096 byte 제한 준수 (한글 1자=3bytes)
+    if len(text.encode("utf-8")) <= 4000:
         send_telegram(text, topic_id=topic_id)
         return
     lines, current = text.split("\n"), ""
     for line in lines:
-        if len(current) + len(line) + 1 > 3800:
-            send_telegram(current.strip(), topic_id=topic_id)
-            time.sleep(0.5)
+        if len((current + line + "\n").encode("utf-8")) > 3800:
+            if current.strip():
+                send_telegram(current.strip(), topic_id=topic_id)
+                time.sleep(0.5)
             current = line + "\n"
         else:
             current += line + "\n"
@@ -570,9 +572,51 @@ def load_portfolio() -> dict | None:
     return None
 
 
+REBALANCING_CHANGES_FILE = Path(__file__).parent / "rebalancing_changes.json"
+PORTFOLIO_PREV_FILE      = Path(__file__).parent / "portfolio_prev_us.json"
+
+def _save_rebalancing_changes(prev: dict | None, new_holdings: list[dict]) -> None:
+    prev_map = {h["ticker"]: h for h in (prev or {}).get("holdings", [])}
+    new_map  = {h["ticker"]: h for h in new_holdings}
+    result   = {
+        "date":      datetime.now(KST).strftime("%Y-%m-%d"),
+        "month":     datetime.now(KST).strftime("%Y-%m"),
+        "new":       [], "exited": [], "increased": [],
+        "decreased": [], "unchanged": [],
+    }
+    for t in set(new_map) | set(prev_map):
+        if t == "CASH":
+            continue
+        c, p = new_map.get(t), prev_map.get(t)
+        if c and not p:
+            result["new"].append(c)
+        elif p and not c:
+            result["exited"].append(p)
+        else:
+            diff = round(c["weight"] - p["weight"], 2)
+            enriched = {**c, "prev_weight": p["weight"], "weight_diff": diff}
+            if diff > 0.5:
+                result["increased"].append(enriched)
+            elif diff < -0.5:
+                result["decreased"].append(enriched)
+            else:
+                result["unchanged"].append(enriched)
+    try:
+        REBALANCING_CHANGES_FILE.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        log.info("변경 내역 저장 -> rebalancing_changes.json")
+    except Exception as e:
+        log.warning(f"변경 내역 저장 실패: {e}")
+
 def save_portfolio(data: dict) -> None:
+    if PORTFOLIO_FILE.exists():
+        try:
+            PORTFOLIO_PREV_FILE.write_text(
+                PORTFOLIO_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+        except Exception as e:
+            log.warning(f"이전 포트폴리오 백업 실패: {e}")
     PORTFOLIO_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    log.info(f"포트폴리오 저장 → {PORTFOLIO_FILE}")
+    log.info(f"포트폴리오 저장 -> {PORTFOLIO_FILE}")
 
 
 def _load_last_rebal() -> str | None:
@@ -1639,6 +1683,9 @@ def _do_monthly_scan() -> None:
 
         # 재무 캐시 저장 (다음 실행 시 재활용)
         _save_info_cache()
+
+        # [v4.11.1] 변경 내역 저장 (대시보드용)
+        _save_rebalancing_changes(prev_portfolio, new_holdings)
 
         save_portfolio({
             "month":                now_month,
