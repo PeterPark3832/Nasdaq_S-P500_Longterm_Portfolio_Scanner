@@ -1063,26 +1063,20 @@ def build_rebalancing_brief(
         f"🗂 *신규 포트폴리오 (총 {len(new_holdings)}항목)*\n"
     )
 
-    stale_tickers: list[str] = []   # [v4.4] stale 종목 수집
+    stale_tickers: list[str] = []
 
     portfolio_body = ""
     for h in new_holdings:
         if h["ticker"] == "CASH":
-            portfolio_body += f"  💵 *{h['name']}*  비중 {h['weight']}%\n\n"
+            portfolio_body += f"  💵 현금  {h['weight']}%\n"
         else:
-            # [v4.4] 재무 신선도 표시
-            stale_flag = ""
+            stale_flag = "⚠️" if h.get("data_stale") else ""
             if h.get("data_stale"):
-                stale_flag = " ⚠️_재무구식_"
                 stale_tickers.append(h["ticker"])
-            fin_dt_str = f" | 재무기준 {h['fin_report_dt']}" if h.get("fin_report_dt") else ""
+            sector_short = (h.get("sector") or "?").replace("Communication Services", "Comm.").replace("Consumer Discretionary", "Cons.Disc").replace("Basic Materials", "소재")
             portfolio_body += (
-                f"  *{h['name']}* ({h['ticker']}){stale_flag}\n"
-                f"  섹터: {h.get('sector','?')} | 비중 {h['weight']}% | 점수 {h['score']}점{fin_dt_str}\n"
-                f"  진입가 ${h['entry_price']:,.2f}\n"
-                f"  ROE {h['roe']}% | 마진 {h['margin']}% | PEG {h['peg']}\n"
-                f"  매출성장 {h.get('rev_growth',0):+.1f}% | FCF마진 {h.get('fcf_margin',0):.1f}% | D/E {h.get('de_ratio',0):.0f}%\n"
-                f"  6개월 {h['ret_6m']:+.1f}% | 52주위치 {h['w52_pos']}%\n\n"
+                f"  *{h['ticker']}* {stale_flag}  {h['weight']}% | {h['score']}pt | {sector_short}\n"
+                f"  ${h['entry_price']:,.0f} | 6M {h['ret_6m']:+.1f}% | ROE {h['roe']:.0f}%\n"
             )
 
     change_body = ""
@@ -1093,66 +1087,40 @@ def build_rebalancing_brief(
         entries  = set(new_map)  - set(prev_map)
         retained = set(prev_map) & set(new_map)
 
-        change_body += "📊 *변경 내역*\n"
-        for t in sorted(entries):
-            h = new_map[t]
-            if t != "CASH":
-                change_body += f"  🟢 신규 편입: *{h['name']}* ({t}) {h['weight']}%\n"
-        for t in sorted(exits):
-            h = prev_map[t]
-            if t != "CASH":
-                change_body += f"  🔴 포트폴리오 제외: *{h['name']}* ({t})\n"
+        new_parts  = [f"🟢 {t} {new_map[t]['weight']}%"  for t in sorted(entries)  if t != "CASH"]
+        exit_parts = [f"🔴 {t}"                           for t in sorted(exits)    if t != "CASH"]
+        up_parts   = []
+        dn_parts   = []
         for t in sorted(retained):
-            p, n = prev_map[t], new_map[t]
-            diff = round(n["weight"] - p["weight"], 1)
-            name = f"*{n['name']}*" if t == "CASH" else f"*{n['name']}* ({t})"
+            if t == "CASH":
+                continue
+            diff = round(new_map[t]["weight"] - prev_map[t]["weight"], 1)
             if diff > 0.5:
-                change_body += f"  🔼 비중 확대: {name} {p['weight']}%→{n['weight']}% (+{diff}%p)\n"
+                up_parts.append(f"🔼 {t} {prev_map[t]['weight']}→{new_map[t]['weight']}%")
             elif diff < -0.5:
-                change_body += f"  🔽 비중 축소: {name} {p['weight']}%→{n['weight']}% ({diff}%p)\n"
-            else:
-                change_body += f"  ⚪ 유지: {name} {n['weight']}%\n"
+                dn_parts.append(f"🔽 {t} {prev_map[t]['weight']}→{new_map[t]['weight']}%")
+
+        change_body = "📊 *변경 내역*\n"
+        if new_parts:  change_body += "  " + "  ".join(new_parts)  + "\n"
+        if exit_parts: change_body += "  " + "  ".join(exit_parts) + "\n"
+        if up_parts:   change_body += "  " + "  ".join(up_parts)   + "\n"
+        if dn_parts:   change_body += "  " + "  ".join(dn_parts)   + "\n"
         change_body += "\n"
     else:
-        change_body = "📌 *첫 번째 포트폴리오 구성입니다*\n\n"
+        change_body = "📌 *첫 번째 포트폴리오 구성*\n\n"
 
-    # [v4.4] 데이터 품질 경고 섹션
-    data_quality_body = ""
-    if stale_tickers:
-        data_quality_body = (
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"⚠️ *데이터 신선도 경고* ({len(stale_tickers)}개 종목)\n"
-            f"  재무 보고서 기준일이 {STRATEGY['fin_stale_warn_days']}일 이상 경과:\n"
-            f"  {', '.join(stale_tickers)}\n"
-            f"  → 해당 종목의 재무 점수는 신뢰도가 낮을 수 있습니다\n\n"
-        )
+    stale_body = (
+        f"⚠️ 재무구식: {', '.join(stale_tickers)}\n"
+        if stale_tickers else ""
+    )
 
-    effective_cash = cash_weight if cash_weight is not None else STRATEGY["safe_asset_weight"]
     footer = (
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"💡 *비중 적용 방법 (예: 총 $10,000)*\n"
-        f"  안전 자산: ${effective_cash * 100:,.0f} 현금 보관\n"
-        f"  나머지 주식: 비중(%) × $100씩 매수\n\n"
-        f"📌 *전략: D 혼합 (백테스트 2015~2024 CAGR +19.49%)*\n"
         f"🗓 다음 리밸런싱: {next_month} 초\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"🔬 *편향 경고 (v4.8)*\n"
-        f"  • 재무 데이터: yfinance 현재값 → 미래참조 편향 존재\n"
-        f"    (⚠️ 표시 종목은 보고서 기준일 {STRATEGY['fin_stale_warn_days']}일+ 경과)\n"
-        f"  • 유니버스: 현재 S&P500/나스닥100 구성 → 생존자 편향 존재\n"
-        f"    (스냅샷은 universe_snapshots/ 폴더에 월별 보존)\n"
-        f"  • 모멘텀(40점)은 가격 기반 → 상대적으로 신뢰도 높음\n"
-        f"⚠️ 투자 판단은 본인 책임 — 참고 자료입니다"
+        f"⚠️ 투자 판단은 본인 책임"
     )
 
-    # [v4.6] 매매 실행 체크리스트 — prev를 그대로 활용 (중복 파라미터 제거)
-    checklist_body = (
-        "\n━━━━━━━━━━━━━━━━━━\n"
-        + build_trade_checklist(prev, new_holdings)
-        + "\n"
-    )
-
-    return header + portfolio_body + change_body + data_quality_body + checklist_body + footer
+    return header + portfolio_body + "\n" + change_body + stale_body + footer
 
 
 # ══════════════════════════════════════════
