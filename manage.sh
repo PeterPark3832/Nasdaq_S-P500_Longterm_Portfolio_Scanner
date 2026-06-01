@@ -5,6 +5,7 @@
 # =============================================
 
 SERVICE="stock_scanner_us"
+DASHBOARD_SERVICE="portfolio_dashboard"
 BOT_DIR="/root/swing_bot"
 VENV_DIR="$BOT_DIR/venv"
 BOT_FILE="$BOT_DIR/longterm_scanner_v4.11.py"
@@ -163,6 +164,35 @@ for h in data['holdings']:
     fi
     ;;
 
+  # ── 대시보드 설치 ─────────────────────────────
+  dashboard-install)
+    info "=== 대시보드 설치 ==="
+    info "FastAPI 패키지 설치..."
+    "$VENV_DIR/bin/pip" install -r "$BOT_DIR/requirements_dashboard.txt" -q
+    info "systemd 서비스 등록..."
+    cp "$BOT_DIR/dashboard.service" /etc/systemd/system/"$DASHBOARD_SERVICE".service
+    systemctl daemon-reload
+    systemctl enable "$DASHBOARD_SERVICE"
+    systemctl start "$DASHBOARD_SERVICE"
+    sleep 2
+    systemctl status "$DASHBOARD_SERVICE" --no-pager | head -10
+    local_ip=$(hostname -I | awk '{print $1}')
+    info "대시보드 접속: http://${local_ip}:8502/?token=scanner2024"
+    ;;
+
+  # ── 대시보드 시작/중지/재시작/상태 ──────────
+  dashboard)
+    case "$2" in
+      start)   systemctl start "$DASHBOARD_SERVICE"   && info "대시보드 시작됨" ;;
+      stop)    systemctl stop "$DASHBOARD_SERVICE"    && info "대시보드 중지됨" ;;
+      restart) systemctl restart "$DASHBOARD_SERVICE" && info "대시보드 재시작됨" ;;
+      status)  systemctl status "$DASHBOARD_SERVICE" --no-pager ;;
+      *)
+        info "사용법: bash manage.sh dashboard [start|stop|restart|status]"
+        ;;
+    esac
+    ;;
+
   # ── 업데이트 ─────────────────────────────────
   update)
     info "봇 파일 업데이트..."
@@ -176,16 +206,22 @@ for h in data['holdings']:
     echo ""
     echo "사용법: bash manage.sh [명령어]"
     echo ""
-    echo "  install    최초 설치 (가상환경 + 패키지 + systemd 등록)"
-    echo "  start      봇 시작"
-    echo "  stop       봇 중지"
-    echo "  restart    봇 재시작"
-    echo "  status     실행 상태 확인"
-    echo "  log        최근 로그 50줄 출력"
-    echo "  log live   실시간 로그 스트리밍"
-    echo "  portfolio  현재 포트폴리오 출력"
-    echo "  rebal      강제 리밸런싱 재실행"
-    echo "  update     업데이트 방법 안내"
+    echo "  install             최초 설치 (가상환경 + 패키지 + systemd 등록)"
+    echo "  start               봇 시작"
+    echo "  stop                봇 중지"
+    echo "  restart             봇 재시작"
+    echo "  status              실행 상태 확인"
+    echo "  log                 최근 로그 50줄 출력"
+    echo "  log live            실시간 로그 스트리밍"
+    echo "  portfolio           현재 포트폴리오 출력"
+    echo "  rebal               강제 리밸런싱 재실행"
+    echo "  update              업데이트 방법 안내"
+    echo ""
+    echo "  dashboard-install   대시보드 최초 설치 (FastAPI + systemd 등록)"
+    echo "  dashboard start     대시보드 시작"
+    echo "  dashboard stop      대시보드 중지"
+    echo "  dashboard restart   대시보드 재시작"
+    echo "  dashboard status    대시보드 상태 확인"
     echo ""
     ;;
 esac
