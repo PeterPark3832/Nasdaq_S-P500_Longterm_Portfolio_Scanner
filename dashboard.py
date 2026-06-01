@@ -1,653 +1,786 @@
-"""
-US Long-Term Portfolio Scanner — 대시보드
-접속: http://<server-ip>:8502/?token=scanner2024
-"""
-import os
-import time
-from datetime import datetime, timedelta
+import os, json
+from pathlib import Path
+from datetime import datetime
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+import uvicorn
 
-import pandas as pd
-import plotly.graph_objects as go
-import streamlit as st
+BASE  = Path(__file__).parent
+TOKEN = os.getenv("DASHBOARD_TOKEN", "scanner2024")
+app   = FastAPI(docs_url=None, redoc_url=None)
 
-from dashboard_data import (
-    COLORS, DRIFT_THRESHOLD, MDD_THRESHOLD, PLOTLY_TEMPLATE,
-    STOPLOSS_THRESHOLD, STOPLOSS_WARN_LEVEL, VIX_CAUTION, VIX_FEAR,
-    compute_rebalancing_changes, compute_score_breakdown,
-    get_latest_perf, infer_vix_regime, load_last_rebal,
-    load_performance_history, load_portfolio, load_prev_portfolio,
-    sector_counts,
-)
+def _load(fname):
+    try:    return json.loads((BASE / fname).read_text())
+    except: return None
 
-# ── 페이지 설정 ───────────────────────────────────────────────────
-st.set_page_config(
-    page_title="US Portfolio Dashboard",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+@app.get("/api/data")
+def api_data(token: str = ""):
+    if token != TOKEN: raise HTTPException(401)
+    return JSONResponse({
+        "portfolio":   _load("portfolio_state_us.json") or {},
+        "performance": _load("performance_history.json") or {"records": []},
+        "last_rebal":  _load("last_rebal_us.json") or {},
+        "updated":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
 
-# ── 인증 ─────────────────────────────────────────────────────────
-_TOKEN = os.getenv("DASHBOARD_TOKEN", "scanner2024")
-_params = st.query_params
-if _params.get("token") != _TOKEN:
-    st.markdown("## 🔒 접근 제한")
-    st.error("올바른 토큰이 URL에 없습니다.  \n예: `http://server:8502/?token=scanner2024`")
-    st.stop()
+@app.get("/", response_class=HTMLResponse)
+def index(token: str = ""):
+    if token != TOKEN:
+        return HTMLResponse("""<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>US Portfolio</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0B0E17;color:#e2e8f0;font-family:system-ui,sans-serif;
+  display:flex;align-items:center;justify-content:center;min-height:100vh}
+.c{background:#131820;border:1px solid #1E2840;border-radius:16px;padding:48px 40px;text-align:center}
+.lock{font-size:52px;margin-bottom:20px}.t{font-size:22px;font-weight:700;margin-bottom:8px}
+code{color:#00C6A9;background:rgba(0,198,169,.12);padding:2px 8px;border-radius:4px;font-size:13px}
+</style></head><body><div class="c"><div class="lock">🔒</div>
+<div class="t">접근 제한</div>
+<p style="color:#64748b;font-size:14px;margin-top:8px">URL에 <code>?token=scanner2024</code> 추가</p>
+</div></body></html>""")
+    return HTMLResponse(MAIN.replace("__TOKEN__", token))
 
-# ── 커스텀 CSS ────────────────────────────────────────────────────
-st.markdown("""
+MAIN = r"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>US Portfolio Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <style>
-[data-testid="stAppViewContainer"] { background-color: #0E1117; }
-[data-testid="metric-container"] {
-    background: #1C2333; border-radius: 8px; padding: 12px 16px;
+:root{
+  --bg:#0B0E17; --s1:#131820; --s2:#1B2236; --bd:#1E2840;
+  --tx:#e2e8f0; --mu:#64748b;
+  --pr:#00C6A9; --gn:#22c55e; --rd:#ef4444;
+  --bl:#6366f1; --gd:#f59e0b; --or:#f97316;
+  --sb:220px;
 }
-.status-new      { color: #00C853; font-weight: 700; }
-.status-exit     { color: #EF5350; font-weight: 700; }
-.status-up       { color: #42A5F5; font-weight: 700; }
-.status-down     { color: #FFA726; font-weight: 700; }
-.status-ok       { color: #78909C; }
-.section-title   { font-size: 1.15rem; font-weight: 700; margin-top: 8px; }
+*{margin:0;padding:0;box-sizing:border-box}
+html{font-size:16px;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--tx);
+  font-family:system-ui,-apple-system,'Segoe UI',sans-serif;min-height:100vh}
+
+/* ══ SIDEBAR (PC) ══ */
+.sidebar{
+  position:fixed;top:0;left:0;bottom:0;width:var(--sb);
+  background:var(--s1);border-right:1px solid var(--bd);
+  display:flex;flex-direction:column;padding:20px 12px;z-index:200;
+}
+.sb-logo{display:flex;align-items:center;gap:8px;padding:4px 8px;margin-bottom:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--gn);
+  box-shadow:0 0 8px var(--gn);flex-shrink:0;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.sb-logo-txt{font-size:15px;font-weight:800}
+.sb-month{font-size:11px;color:var(--mu);padding:0 8px;margin-bottom:20px}
+.sidenav{list-style:none;flex:1}
+.snitem{display:flex;align-items:center;gap:10px;padding:10px 12px;
+  border-radius:9px;cursor:pointer;font-size:14px;font-weight:500;
+  color:var(--mu);transition:all .15s;margin-bottom:2px}
+.snitem:hover{background:var(--s2);color:var(--tx)}
+.snitem.on{background:rgba(0,198,169,.12);color:var(--pr);font-weight:700}
+.snitem .ic{font-size:16px;width:20px;text-align:center}
+.sb-footer{border-top:1px solid var(--bd);padding-top:14px;margin-top:4px}
+.sb-clock{font-size:12px;color:var(--mu);padding:0 8px}
+.sb-upd{font-size:11px;color:var(--mu);padding:4px 8px 0;opacity:.7}
+
+/* ══ MOBILE TOP BAR ══ */
+.topbar{display:none;position:fixed;top:0;left:0;right:0;height:54px;
+  background:var(--s1);border-bottom:1px solid var(--bd);
+  align-items:center;padding:0 16px;gap:8px;z-index:200}
+.tb-logo{display:flex;align-items:center;gap:7px;flex:1}
+.tb-txt{font-size:15px;font-weight:800}
+.tb-month{font-size:12px;color:var(--mu)}
+.tb-clock{font-size:12px;color:var(--mu)}
+
+/* ══ MOBILE BOTTOM NAV ══ */
+.mnav{display:none;position:fixed;bottom:0;left:0;right:0;height:62px;
+  background:var(--s1);border-top:1px solid var(--bd);z-index:200}
+.mnavitems{display:flex;height:100%}
+.mnavitem{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:3px;border:none;background:transparent;
+  color:var(--mu);font-size:10px;cursor:pointer;transition:color .15s}
+.mnavitem.on{color:var(--pr)}
+.mnavitem .mic{font-size:20px;line-height:1}
+
+/* ══ MAIN CONTENT ══ */
+.main{margin-left:var(--sb);padding:28px;min-height:100vh}
+.sec{display:none}.sec.on{display:block}
+
+/* ══ PAGE HEADER ══ */
+.phdr{margin-bottom:22px}
+.ptitle{font-size:20px;font-weight:800}
+.psub{font-size:13px;color:var(--mu);margin-top:4px}
+
+/* ══ KPI GRID ══ */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+.kpi{background:var(--s1);border:1px solid var(--bd);border-radius:12px;padding:18px 20px}
+.klabel{font-size:11px;color:var(--mu);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.kval{font-size:26px;font-weight:800;line-height:1;letter-spacing:-.02em}
+.ksub{font-size:11px;color:var(--mu);margin-top:5px}
+.pos{color:var(--gn)}.neg{color:var(--rd)}.neu{color:var(--pr)}
+
+/* ══ CARDS ══ */
+.card{background:var(--s1);border:1px solid var(--bd);border-radius:12px;padding:20px}
+.cc{background:var(--s1);border:1px solid var(--bd);border-radius:12px;padding:20px}
+.ctitle{font-size:11px;font-weight:700;color:var(--mu);text-transform:uppercase;
+  letter-spacing:.07em;margin-bottom:14px}
+
+/* ══ PC LAYOUT GRIDS ══ */
+.home-grid{display:grid;grid-template-columns:2fr 1fr;gap:16px;align-items:start}
+.home-list{max-height:520px;overflow-y:auto}
+.port-grid{display:grid;grid-template-columns:340px 1fr;gap:16px;margin-bottom:16px;align-items:start}
+.risk-grid{display:grid;grid-template-columns:1fr 1.6fr;gap:16px;margin-bottom:16px;align-items:start}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.mb16{margin-bottom:16px}
+
+/* ══ CHART FILTER ══ */
+.cf{display:flex;align-items:center;gap:6px;margin-bottom:14px}
+.cf-lbl{font-size:11px;color:var(--mu);margin-right:4px}
+.cfbtn{padding:4px 12px;border-radius:6px;border:1px solid var(--bd);
+  background:transparent;color:var(--mu);font-size:12px;font-weight:600;
+  cursor:pointer;transition:all .15s}
+.cfbtn.on{background:var(--pr);color:#fff;border-color:var(--pr)}
+.cfbtn:hover:not(.on){background:var(--s2);color:var(--tx)}
+
+/* ══ TABLE ══ */
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:9px 12px;background:var(--s2);color:var(--mu);
+  font-size:10px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.06em;white-space:nowrap}
+th:first-child{border-radius:6px 0 0 6px}th:last-child{border-radius:0 6px 6px 0}
+td{padding:10px 12px;border-bottom:1px solid var(--bd);white-space:nowrap}
+tr:hover td{background:rgba(255,255,255,.025)}
+tr:last-child td{border-bottom:none}
+
+/* ══ WEIGHT BAR ══ */
+.wb{display:flex;align-items:center;gap:8px;min-width:110px}
+.wbg{flex:1;height:5px;border-radius:3px;background:var(--bd);overflow:hidden}
+.wbf{height:5px;border-radius:3px;background:var(--pr)}
+.wpct{font-size:12px;font-weight:700;min-width:38px;text-align:right}
+
+/* ══ BADGES ══ */
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+.bg{background:rgba(34,197,94,.12);color:var(--gn)}
+.br{background:rgba(239,68,68,.12);color:var(--rd)}
+.bb{background:rgba(99,102,241,.12);color:var(--bl)}
+.bo{background:rgba(245,158,11,.12);color:var(--gd)}
+.bt{background:rgba(0,198,169,.12);color:var(--pr)}
+
+/* ══ SECTOR LIST ══ */
+.slist{list-style:none}
+.si{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd)}
+.si:last-child{border-bottom:none}
+.sdot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.sname{flex:1;font-size:13px}
+.spct{font-size:13px;font-weight:700;color:var(--pr)}
+
+/* ══ GAUGE ══ */
+.gauge-wrap{display:flex;flex-direction:column;align-items:center;padding:10px 0 4px}
+.gval{font-size:34px;font-weight:800;margin:8px 0 4px;line-height:1}
+.glabel{font-size:12px;color:var(--mu)}
+
+/* ══ REGIME ══ */
+.regime{padding:16px;border-radius:10px;text-align:center;margin-bottom:14px}
+.r-normal{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.2)}
+.r-caution{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.2)}
+.r-fear{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2)}
+.rlabel{font-size:22px;font-weight:800}
+.rsub{font-size:12px;color:var(--mu);margin-top:4px}
+
+/* ══ ALERTS ══ */
+.al{padding:12px 16px;border-radius:8px;margin-bottom:8px;font-size:13px}
+.al-ok{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.2);color:var(--gn)}
+.al-err{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:var(--rd)}
+
+/* ══ MOBILE HOLDING CARDS ══ */
+.mcards{display:none}
+.mcard{background:var(--s2);border:1px solid var(--bd);border-radius:12px;
+  padding:14px 16px;margin-bottom:10px}
+.mcard-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
+.mcard-ticker{font-size:17px;font-weight:800;color:var(--pr)}
+.mcard-name{font-size:11px;color:var(--mu);margin-top:2px;
+  max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcard-score-val{font-size:17px;font-weight:800}
+.mcard-score-lbl{font-size:10px;color:var(--mu);text-align:right}
+.mcard-wbar{margin-bottom:12px}
+.mcard-wlbl{display:flex;justify-content:space-between;font-size:11px;
+  color:var(--mu);margin-bottom:4px}
+.mcard-wpct{font-weight:700;color:var(--tx)}
+.mcard-wbg{height:6px;border-radius:3px;background:var(--bd);overflow:hidden}
+.mcard-wbf{height:6px;border-radius:3px;background:var(--pr)}
+.mcard-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.mcard-item label{font-size:10px;color:var(--mu);display:block;margin-bottom:3px}
+.mcard-item span{font-size:13px;font-weight:600}
+.mcard-badge{display:inline-block;padding:2px 7px;border-radius:20px;
+  font-size:10px;font-weight:600;background:rgba(99,102,241,.12);color:var(--bl)}
+
+/* ══ RESPONSIVE ══ */
+@media(max-width:1024px){
+  .home-grid{grid-template-columns:1fr}
+  .port-grid{grid-template-columns:1fr}
+  .risk-grid{grid-template-columns:1fr}
+}
+@media(max-width:768px){
+  :root{--sb:0px}
+  .sidebar{display:none}
+  .topbar{display:flex}
+  .mnav{display:block}
+  .main{margin-left:0;padding:62px 14px 74px}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .kpis .kpi:nth-child(5){grid-column:1/-1}
+  .kval{font-size:22px}
+  .g3{grid-template-columns:1fr}
+  th,td{padding:8px 10px}
+  table{font-size:12px}
+  .desk-tbl{display:none}
+  .mcards{display:block}
+  .home-list{max-height:none;overflow-y:visible}
+}
+@media(max-width:420px){
+  .kpis{grid-template-columns:1fr 1fr}
+}
 </style>
-""", unsafe_allow_html=True)
-
-# ── 자동 갱신 (5분) ───────────────────────────────────────────────
-try:
-    from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=300_000, key="auto_refresh")
-except ImportError:
-    pass  # streamlit-autorefresh 미설치 시 수동 갱신으로 동작
-
-# ── 데이터 로드 ───────────────────────────────────────────────────
-portfolio = load_portfolio()
-prev_port = load_prev_portfolio()
-history   = load_performance_history()
-last_rebal = load_last_rebal()
-
-if portfolio is None:
-    st.warning("포트폴리오 데이터가 없습니다. 봇이 아직 리밸런싱을 실행하지 않았습니다.")
-    st.stop()
-
-holdings      = portfolio.get("holdings", [])
-stock_holdings = [h for h in holdings if h["ticker"] != "CASH"]
-cash_h        = next((h for h in holdings if h["ticker"] == "CASH"), None)
-cash_weight   = cash_h["weight"] if cash_h else 30.0
-port_month    = portfolio.get("month", "—")
-latest_perf   = get_latest_perf(history)
-vix_label, vix_emoji, _ = infer_vix_regime(cash_weight)
-
-# ═══════════════════════════════════════════════════════════════════
-# 헤더: 핵심 지표
-# ═══════════════════════════════════════════════════════════════════
-st.markdown("## 📊 US Long-Term Portfolio Dashboard")
-st.caption(f"리밸런싱 월: **{port_month}** | 데이터 갱신: {datetime.now().strftime('%Y-%m-%d %H:%M')} | 자동 갱신 5분")
-
-col1, col2, col3, col4, col5 = st.columns(5)
-
-_ret    = latest_perf["portfolio_ret_pct"] if latest_perf else 0.0
-_spy    = latest_perf.get("spy_ret_pct") if latest_perf else None
-_qqq    = latest_perf.get("qqq_ret_pct") if latest_perf else None
-_alpha  = latest_perf.get("alpha_vs_spy") if latest_perf else None
-
-col1.metric("포트폴리오 수익률", f"{_ret:+.2f}%", delta=None)
-col2.metric("SPY 대비 알파",
-            f"{_alpha:+.2f}%p" if _alpha is not None else "—",
-            delta=f"SPY {_spy:+.2f}%" if _spy is not None else None)
-col3.metric("QQQ 대비",
-            f"{(_ret - _qqq):+.2f}%p" if _qqq is not None else "—",
-            delta=f"QQQ {_qqq:+.2f}%" if _qqq is not None else None)
-col4.metric("현금 비중", f"{cash_weight:.0f}%",
-            delta=f"{'기본 30%' if cash_weight == 30 else f'+{cash_weight-30:.0f}%p 추가'}")
-col5.metric(f"VIX 레짐 {vix_emoji}", vix_label,
-            delta=f"VIX {'<30 정상' if cash_weight == 30 else '≥30 주의' if cash_weight < 60 else '≥40 공포'}")
-
-st.divider()
-
-# ═══════════════════════════════════════════════════════════════════
-# 4탭 구조
-# ═══════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["📋 포트폴리오 현황", "🔄 리밸런싱 변동", "📈 성과 분석", "⚠️ 리스크 모니터링"]
-)
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# TAB 1: 포트폴리오 현황
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-with tab1:
-    col_chart, col_table = st.columns([1, 2])
-
-    # 섹터 도넛 차트
-    with col_chart:
-        st.markdown('<p class="section-title">섹터 배분</p>', unsafe_allow_html=True)
-        sec_weights: dict[str, float] = {}
-        for h in holdings:
-            sec = h.get("sector", "Unknown")
-            sec_weights[sec] = sec_weights.get(sec, 0) + h["weight"]
-
-        sc = sector_counts(holdings)
-        pull = [0.12 if sc.get(s, 0) >= 3 else 0 for s in sec_weights]
-
-        fig_pie = go.Figure(go.Pie(
-            labels=list(sec_weights.keys()),
-            values=list(sec_weights.values()),
-            hole=0.42,
-            pull=pull,
-            marker=dict(line=dict(color="#0E1117", width=2)),
-            hovertemplate="%{label}: %{value:.1f}%<extra></extra>",
-            textinfo="label+percent",
-        ))
-        fig_pie.update_layout(
-            template=PLOTLY_TEMPLATE,
-            height=350,
-            margin=dict(t=20, b=10, l=10, r=10),
-            showlegend=False,
-            annotations=[dict(text="섹터", x=0.5, y=0.5, font_size=13, showarrow=False)],
-        )
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-        capped = [s for s, c in sc.items() if c >= 3]
-        if capped:
-            st.caption(f"섹터 상한(3종목) 도달: {', '.join(capped)}")
-
-    # 보유 종목 테이블
-    with col_table:
-        st.markdown('<p class="section-title">보유 종목 상세</p>', unsafe_allow_html=True)
-        alerted_sl = portfolio.get("last_stoploss_alerts", {})
-
-        rows = []
-        for h in holdings:
-            if h["ticker"] == "CASH":
-                rows.append({
-                    "경보": "💵", "티커": "CASH", "종목명": h["name"][:22],
-                    "섹터": "—", "비중%": h["weight"],
-                    "진입가": "—", "스코어": "—",
-                    "ROE%": "—", "마진%": "—", "PEG": "—",
-                    "6M수익%": "—", "52W위치%": "—",
-                    "재무일자": "—", "데이터": "✅",
-                })
-                continue
-
-            sl_icon = ""
-            if h["ticker"] in alerted_sl:
-                sl_icon = "🔴"
-            elif h.get("data_stale"):
-                sl_icon = "⚠️"
-
-            rows.append({
-                "경보":    sl_icon or "✅",
-                "티커":    h["ticker"],
-                "종목명":  h["name"][:22],
-                "섹터":    h.get("sector", "—"),
-                "비중%":   h["weight"],
-                "진입가":  h["entry_price"],
-                "스코어":  h["score"],
-                "ROE%":    h.get("roe", 0),
-                "마진%":   h.get("margin", 0),
-                "PEG":     h.get("peg", 0),
-                "6M수익%": h.get("ret_6m", 0),
-                "52W위치%":h.get("w52_pos", 0),
-                "재무일자": h.get("fin_report_dt", "—"),
-                "데이터":  "⚠️ 오래됨" if h.get("data_stale") else "✅",
-            })
-
-        df_hold = pd.DataFrame(rows)
-        st.dataframe(
-            df_hold,
-            column_config={
-                "비중%": st.column_config.ProgressColumn(
-                    "비중%", min_value=0, max_value=100, format="%.1f%%"
-                ),
-                "스코어": st.column_config.ProgressColumn(
-                    "스코어/100", min_value=0, max_value=100, format="%.1f"
-                ),
-                "진입가": st.column_config.NumberColumn("진입가 $", format="$%.2f"),
-            },
-            hide_index=True,
-            use_container_width=True,
-            height=380,
-        )
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# TAB 2: 리밸런싱 변동 (핵심)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-with tab2:
-    prev_month = prev_port.get("month", "이전") if prev_port else None
-
-    if prev_port is None:
-        st.info(
-            "이전 달 포트폴리오 데이터(`portfolio_prev_us.json`)가 없습니다.  \n"
-            "다음 리밸런싱 실행 후 자동으로 비교 데이터가 생성됩니다."
-        )
-    else:
-        diff = compute_rebalancing_changes(portfolio, prev_port)
-
-        st.markdown(
-            f'<p class="section-title">리밸런싱 변동: {prev_month} → {port_month}</p>',
-            unsafe_allow_html=True,
-        )
-
-        # 요약 카드
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("🟢 신규 편입", f"{len(diff['new'])}종목")
-        c2.metric("🔴 제외",      f"{len(diff['exited'])}종목")
-        c3.metric("🔼 비중 증가", f"{len(diff['increased'])}종목")
-        c4.metric("🔽 비중 감소", f"{len(diff['decreased'])}종목")
-
-        st.markdown("---")
-
-        # Before/After 비중 비교 바 차트
-        curr_map = {h["ticker"]: h["weight"] for h in holdings if h["ticker"] != "CASH"}
-        prev_map = {h["ticker"]: h["weight"]
-                    for h in prev_port.get("holdings", []) if h["ticker"] != "CASH"}
-
-        all_tickers_sorted = sorted(
-            set(curr_map) | set(prev_map),
-            key=lambda t: -curr_map.get(t, 0),
-        )
-
-        bar_labels, bar_prev, bar_curr, bar_colors, bar_texts = [], [], [], [], []
-        for t in all_tickers_sorted:
-            pw = prev_map.get(t, 0)
-            cw = curr_map.get(t, 0)
-            d  = cw - pw
-            if pw == 0:
-                color = COLORS["new"]
-            elif cw == 0:
-                color = COLORS["exited"]
-            elif d > 0.5:
-                color = COLORS["increased"]
-            elif d < -0.5:
-                color = COLORS["decreased"]
-            else:
-                color = COLORS["unchanged"]
-
-            bar_labels.append(t)
-            bar_prev.append(pw)
-            bar_curr.append(cw)
-            bar_colors.append(color)
-            suffix = " 🟢NEW" if pw == 0 else " 🔴EXIT" if cw == 0 else \
-                     f" ▲+{d:.1f}%p" if d > 0.5 else f" ▼{d:.1f}%p" if d < -0.5 else ""
-            bar_texts.append(f"{cw:.1f}%{suffix}")
-
-        fig_bar = go.Figure()
-        fig_bar.add_trace(go.Bar(
-            name="이전 달",
-            y=bar_labels, x=bar_prev,
-            orientation="h",
-            marker=dict(color="rgba(120,120,120,0.35)",
-                        line=dict(color="rgba(180,180,180,0.5)", width=1)),
-            hovertemplate="%{y} 이전: %{x:.1f}%<extra></extra>",
-        ))
-        fig_bar.add_trace(go.Bar(
-            name="현재",
-            y=bar_labels, x=bar_curr,
-            orientation="h",
-            marker=dict(color=bar_colors),
-            text=bar_texts,
-            textposition="outside",
-            hovertemplate="%{y} 현재: %{x:.1f}%<extra></extra>",
-        ))
-        fig_bar.update_layout(
-            barmode="overlay",
-            template=PLOTLY_TEMPLATE,
-            title="포트폴리오 비중 Before / After",
-            xaxis=dict(title="비중 %", range=[0, max(bar_curr + bar_prev or [35]) * 1.35]),
-            height=max(380, len(bar_labels) * 46),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            margin=dict(l=70, r=20, t=60, b=30),
-        )
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-        # 변동 상세 테이블
-        col_left, col_right = st.columns([1, 1])
-
-        with col_left:
-            st.markdown("**변동 종목 상세**")
-            change_rows = []
-            _STATUS_ICON = {"NEW": "🟢 신규", "EXIT": "🔴 제외",
-                            "INCREASE": "🔼 증가", "DECREASE": "🔽 감소", "UNCHANGED": "⚪ 유지"}
-
-            for status_key, items in [
-                ("NEW", diff["new"]), ("EXIT", diff["exited"]),
-                ("INCREASE", diff["increased"]), ("DECREASE", diff["decreased"]),
-            ]:
-                for h in items:
-                    pw = h.get("prev_weight", 0)
-                    cw = h.get("weight", 0)
-                    change_rows.append({
-                        "구분": _STATUS_ICON[status_key],
-                        "티커": h["ticker"],
-                        "종목명": h.get("name", "")[:20],
-                        "이전 비중": f"{pw:.1f}%" if pw else "—",
-                        "현재 비중": f"{cw:.1f}%" if cw else "—",
-                        "변화": f"{cw - pw:+.1f}%p",
-                        "스코어": f"{h.get('score', 0):.1f}" if h.get('score') else "—",
-                    })
-
-            if change_rows:
-                st.dataframe(pd.DataFrame(change_rows), hide_index=True,
-                             use_container_width=True, height=340)
-            else:
-                st.success("변동 없음 — 포트폴리오가 그대로 유지되었습니다.")
-
-        with col_right:
-            st.markdown("**📋 매매 실행 체크리스트**")
-            st.caption("이 순서대로 실행: 매도 → 비중 축소 → 비중 확대 → 신규 매수")
-
-            _STEP_LABELS = {
-                "sell":     ("1단계 🔴 매도", "전량 매도"),
-                "decrease": ("2단계 🔽 비중 축소", "일부 매도"),
-                "increase": ("3단계 🔼 비중 확대", "추가 매수"),
-                "buy":      ("4단계 🟢 신규 매수", "신규 매수"),
-            }
-            current_step = None
-            for item in diff["trade_order"]:
-                action, ticker, pw, cw, dw = item[0], item[1], item[2], item[3], item[4]
-                step_label, action_label = _STEP_LABELS[action]
-                if action != current_step:
-                    st.markdown(f"**{step_label}**")
-                    current_step = action
-
-                if action == "sell":
-                    desc = f"**{ticker}** 전량 매도 (이전 {pw:.1f}%)"
-                elif action == "decrease":
-                    desc = f"**{ticker}** {pw:.1f}% → {cw:.1f}% ({dw:+.1f}%p)"
-                elif action == "increase":
-                    desc = f"**{ticker}** {pw:.1f}% → {cw:.1f}% ({dw:+.1f}%p)"
-                else:
-                    desc = f"**{ticker}** 신규 매수 → {cw:.1f}%"
-
-                st.checkbox(desc, key=f"chk_{ticker}_{action}", value=False)
-
-        if diff["unchanged"]:
-            with st.expander(f"⚪ 유지 종목 ({len(diff['unchanged'])}개)"):
-                for h in diff["unchanged"]:
-                    st.write(f"- **{h['ticker']}** ({h.get('name','')[:20]}) — {h['weight']:.1f}%")
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# TAB 3: 성과 분석
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-with tab3:
-    st.markdown('<p class="section-title">누적 수익률 vs 벤치마크</p>', unsafe_allow_html=True)
-
-    if not history:
-        st.info("아직 성과 이력이 없습니다. 리밸런싱을 1회 이상 실행하면 표시됩니다.")
-    else:
-        df_hist = pd.DataFrame(history)
-        df_hist["date"] = pd.to_datetime(df_hist["date"])
-        df_hist = df_hist.sort_values("date")
-
-        fig_line = go.Figure()
-        fig_line.add_trace(go.Scatter(
-            x=df_hist["date"], y=df_hist["portfolio_ret_pct"],
-            name="포트폴리오", mode="lines+markers",
-            line=dict(color=COLORS["portfolio"], width=2.5),
-            marker=dict(
-                size=9,
-                symbol=["diamond" if t == "performance_check" else "circle"
-                        for t in df_hist.get("type", ["circle"] * len(df_hist))],
-            ),
-            hovertemplate="<b>포트폴리오</b>: %{y:+.2f}%<br>%{x|%Y-%m-%d}<extra></extra>",
-        ))
-
-        spy_df = df_hist.dropna(subset=["spy_ret_pct"])
-        if not spy_df.empty:
-            fig_line.add_trace(go.Scatter(
-                x=spy_df["date"], y=spy_df["spy_ret_pct"],
-                name="SPY", mode="lines+markers",
-                line=dict(color=COLORS["spy"], width=1.5, dash="dash"),
-                hovertemplate="<b>SPY</b>: %{y:+.2f}%<extra></extra>",
-            ))
-
-        qqq_df = df_hist.dropna(subset=["qqq_ret_pct"])
-        if not qqq_df.empty:
-            fig_line.add_trace(go.Scatter(
-                x=qqq_df["date"], y=qqq_df["qqq_ret_pct"],
-                name="QQQ", mode="lines+markers",
-                line=dict(color=COLORS["qqq"], width=1.5, dash="dot"),
-                hovertemplate="<b>QQQ</b>: %{y:+.2f}%<extra></extra>",
-            ))
-
-        fig_line.add_hline(y=0, line_color="rgba(200,200,200,0.3)", line_dash="dot")
-        fig_line.update_layout(
-            template=PLOTLY_TEMPLATE,
-            yaxis_title="수익률 %",
-            height=400,
-            legend=dict(orientation="h"),
-            hovermode="x unified",
-            margin=dict(t=20, b=30),
-        )
-        st.plotly_chart(fig_line, use_container_width=True)
-
-        # 알파 요약
-        alpha_df = df_hist.dropna(subset=["alpha_vs_spy"])
-        if not alpha_df.empty:
-            avg_alpha = alpha_df["alpha_vs_spy"].mean()
-            mc1, mc2, mc3 = st.columns(3)
-            mc1.metric("평균 알파 (vs SPY)", f"{avg_alpha:+.2f}%p")
-            latest_a = alpha_df.iloc[-1]
-            mc2.metric("최근 알파",
-                       f"{latest_a['alpha_vs_spy']:+.2f}%p",
-                       delta=latest_a["date"].strftime("%Y-%m-%d"))
-            positive = (alpha_df["alpha_vs_spy"] > 0).sum()
-            mc3.metric("양의 알파 비율", f"{positive}/{len(alpha_df)} 회")
-
-        # 월별 성과 테이블
-        st.markdown("---")
-        st.markdown("**월별 성과 이력**")
-        df_display = df_hist.copy()
-        df_display["date"] = df_display["date"].dt.strftime("%Y-%m-%d")
-        df_display = df_display.rename(columns={
-            "date": "날짜", "type": "타입",
-            "portfolio_ret_pct": "포트폴리오%",
-            "spy_ret_pct": "SPY%",
-            "qqq_ret_pct": "QQQ%",
-            "alpha_vs_spy": "알파 vs SPY",
-        })
-        for c in ["포트폴리오%", "SPY%", "QQQ%", "알파 vs SPY"]:
-            if c in df_display.columns:
-                df_display[c] = df_display[c].apply(
-                    lambda v: f"{v:+.2f}%" if pd.notna(v) else "—"
-                )
-        st.dataframe(df_display[["날짜","타입","포트폴리오%","SPY%","QQQ%","알파 vs SPY"]],
-                     hide_index=True, use_container_width=True)
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# TAB 4: 리스크 모니터링
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-with tab4:
-    r1, r2 = st.columns([1, 2])
-
-    # MDD 게이지
-    with r1:
-        max_equity = portfolio.get("max_equity", 0.0)
-        mdd_pct = max_equity  # 양수 = 고점 대비 상승 여력, 음수 = MDD 진행
-
-        fig_mdd = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=max_equity,
-            number={"suffix": "%", "valueformat": "+.2f"},
-            title={"text": "포트폴리오 수익률 (MDD 기준)"},
-            gauge={
-                "axis": {"range": [-30, 30]},
-                "bar":  {"color": COLORS["portfolio"]},
-                "steps": [
-                    {"range": [-30, MDD_THRESHOLD], "color": "#B71C1C"},
-                    {"range": [MDD_THRESHOLD, -5],  "color": "#E65100"},
-                    {"range": [-5, 0],              "color": "#F9A825"},
-                    {"range": [0, 30],              "color": "#1B5E20"},
-                ],
-                "threshold": {
-                    "line": {"color": "red", "width": 4},
-                    "thickness": 0.75,
-                    "value": MDD_THRESHOLD,
-                },
-            },
-        ))
-        fig_mdd.update_layout(template=PLOTLY_TEMPLATE, height=280,
-                              margin=dict(t=40, b=10, l=20, r=20))
-        st.plotly_chart(fig_mdd, use_container_width=True)
-        st.caption(f"MDD 경보 임계치: {MDD_THRESHOLD:.0f}%")
-
-    # 스톱로스 + 드리프트 상태
-    with r2:
-        st.markdown("**스톱로스 알림 현황**")
-        alerted = portfolio.get("last_stoploss_alerts", {})
-        if alerted:
-            for ticker, alert_date in alerted.items():
-                st.error(f"🔴 **{ticker}** — 스톱로스 알림 발생: {alert_date}")
-        else:
-            st.success("이번 달 스톱로스 알림 없음")
-        st.caption(f"임계치: {STOPLOSS_THRESHOLD:.0f}% (경고: {STOPLOSS_WARN_LEVEL:.0f}%)")
-
-        st.markdown("---")
-        st.markdown("**포지션 드리프트 현황**")
-        last_drift = portfolio.get("last_drift_alert_date")
-        if last_drift:
-            st.warning(f"⚠️ 드리프트 알림 발생 날짜: {last_drift} — 텔레그램 메시지 확인 바람")
-        else:
-            st.success("이번 달 드리프트 알림 없음")
-        st.caption(f"드리프트 임계치: ±{DRIFT_THRESHOLD:.0f}%p")
-
-        # 진입가 기준 보유 종목 테이블
-        st.markdown("---")
-        st.markdown("**보유 종목 진입가 기준표**")
-        sl_rows = []
-        for h in stock_holdings:
-            ep = h.get("entry_price", 0)
-            warn_price = ep * (1 + STOPLOSS_WARN_LEVEL / 100)
-            sl_price   = ep * (1 + STOPLOSS_THRESHOLD / 100)
-            sl_rows.append({
-                "티커":    h["ticker"],
-                "진입가":  f"${ep:.2f}",
-                f"경고({STOPLOSS_WARN_LEVEL:.0f}%)": f"${warn_price:.2f}",
-                f"스톱로스({STOPLOSS_THRESHOLD:.0f}%)": f"${sl_price:.2f}",
-                "진입일":  h.get("entry_date", "—"),
-                "경보":    "🔴" if h["ticker"] in alerted else "✅",
-            })
-        st.dataframe(pd.DataFrame(sl_rows), hide_index=True, use_container_width=True)
-
-    st.divider()
-
-    # VIX 레짐 시각화
-    rc1, rc2, rc3 = st.columns([1, 1, 1])
-
-    with rc1:
-        st.markdown("**VIX 레짐 현황**")
-        fig_vix = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=cash_weight,
-            number={"suffix": "% 현금"},
-            title={"text": "현금 비중 (VIX 레짐 반영)"},
-            gauge={
-                "axis": {"range": [0, 70]},
-                "bar":  {"color": COLORS["cash"]},
-                "steps": [
-                    {"range": [0, 30],  "color": "#1B5E20"},
-                    {"range": [30, 50], "color": "#E65100"},
-                    {"range": [50, 70], "color": "#B71C1C"},
-                ],
-            },
-        ))
-        fig_vix.update_layout(template=PLOTLY_TEMPLATE, height=260,
-                              margin=dict(t=40, b=10, l=20, r=20))
-        st.plotly_chart(fig_vix, use_container_width=True)
-
-    with rc2:
-        st.markdown("**VIX 레짐 기준표**")
-        regime_df = pd.DataFrame([
-            {"레짐": "🟢 정상", "VIX": f"< {VIX_CAUTION}", "현금 비중": "30% (기본)"},
-            {"레짐": "🟡 주의", "VIX": f"≥ {VIX_CAUTION}", "현금 비중": "+20%p → 50%"},
-            {"레짐": "🔴 공포", "VIX": f"≥ {VIX_FEAR}",    "현금 비중": "+30%p → 60%"},
-        ])
-        st.table(regime_df)
-        st.metric("현재 레짐", f"{vix_emoji} {vix_label}", delta=f"현금 {cash_weight:.0f}%")
-
-    with rc3:
-        st.markdown("**일정 정보**")
-        if port_month and port_month != "—":
-            try:
-                curr_dt = datetime.strptime(port_month + "-01", "%Y-%m-%d")
-                next_rebal = (curr_dt.replace(day=1) + timedelta(days=32)).replace(day=1)
-                days_left = (next_rebal - datetime.now()).days
-                st.metric("현재 포트폴리오 월", port_month)
-                st.metric("다음 리밸런싱 예상", next_rebal.strftime("%Y-%m"),
-                          delta=f"약 {days_left}일 후")
-            except ValueError:
-                st.metric("현재 포트폴리오 월", port_month)
-        st.metric("마지막 리밸런싱", last_rebal or "—")
-
-    st.divider()
-
-    # 스코어 브레이크다운 (Tab4 하단)
-    st.markdown('<p class="section-title">종목별 스코어 구성</p>', unsafe_allow_html=True)
-    st.caption("재무품질(40pt) + 기술적(20pt) + 모멘텀(40pt, 추정)")
-
-    bd_tickers, bd_fin, bd_tech, bd_mom = [], [], [], []
-    bd_rows = []
-    for h in sorted(stock_holdings, key=lambda x: -x.get("score", 0)):
-        bd = compute_score_breakdown(h)
-        bd_tickers.append(h["ticker"])
-        bd_fin.append(bd["financial"])
-        bd_tech.append(bd["technical"])
-        bd_mom.append(bd["momentum"])
-        bd_rows.append({
-            "티커":     h["ticker"],
-            "합계":     f"{bd['total']:.1f}",
-            "재무(40)": f"{bd['financial']:.1f}",
-            "기술(20)": f"{bd['technical']:.1f}",
-            "모멘텀(40)": f"{bd['momentum']:.1f}",
-            "ROE%":  f"{h.get('roe',0):.1f}",
-            "마진%": f"{h.get('margin',0):.1f}",
-            "PEG":   f"{h.get('peg',0):.2f}",
-            "FCF%":  f"{h.get('fcf_margin',0):.1f}",
-            "52W위치": f"{h.get('w52_pos',0):.1f}%",
-        })
-
-    sc_col1, sc_col2 = st.columns([3, 2])
-    with sc_col1:
-        fig_score = go.Figure()
-        fig_score.add_trace(go.Bar(
-            name="재무품질 (40pt max)",
-            y=bd_tickers, x=bd_fin, orientation="h",
-            marker_color="#1976D2",
-            hovertemplate="%{y} 재무: %{x:.1f}pt<extra></extra>",
-        ))
-        fig_score.add_trace(go.Bar(
-            name="기술적/52W (20pt max)",
-            y=bd_tickers, x=bd_tech, orientation="h",
-            marker_color="#388E3C",
-            hovertemplate="%{y} 기술: %{x:.1f}pt<extra></extra>",
-        ))
-        fig_score.add_trace(go.Bar(
-            name="모멘텀 (40pt max, 추정)",
-            y=bd_tickers, x=bd_mom, orientation="h",
-            marker_color="#F57C00",
-            hovertemplate="%{y} 모멘텀: %{x:.1f}pt<extra></extra>",
-        ))
-        fig_score.update_layout(
-            barmode="stack",
-            template=PLOTLY_TEMPLATE,
-            xaxis=dict(range=[0, 105], title="스코어 (pt)"),
-            height=max(280, len(bd_tickers) * 48),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            margin=dict(l=60, r=20, t=30, b=30),
-        )
-        st.plotly_chart(fig_score, use_container_width=True)
-
-    with sc_col2:
-        st.dataframe(pd.DataFrame(bd_rows), hide_index=True, use_container_width=True,
-                     height=max(280, len(bd_rows) * 40 + 40))
-
-
-# ── 푸터 ─────────────────────────────────────────────────────────
-st.markdown("---")
-st.caption(
-    f"📡 데이터 소스: portfolio_state_us.json | "
-    f"갱신: {datetime.now().strftime('%H:%M:%S')} | "
-    f"대시보드 v1.0"
-)
+</head>
+<body>
+
+<!-- ══ SIDEBAR (PC) ══ -->
+<nav class="sidebar">
+  <div class="sb-logo">
+    <div class="dot"></div>
+    <span class="sb-logo-txt">US Portfolio</span>
+  </div>
+  <div class="sb-month" id="sb-month"></div>
+  <ul class="sidenav">
+    <li class="snitem on" onclick="go('home')"><span class="ic">🏠</span>홈</li>
+    <li class="snitem"    onclick="go('port')"><span class="ic">📊</span>포트폴리오</li>
+    <li class="snitem"    onclick="go('perf')"><span class="ic">📈</span>성과 분석</li>
+    <li class="snitem"    onclick="go('risk')"><span class="ic">⚠️</span>리스크</li>
+  </ul>
+  <div class="sb-footer">
+    <div class="sb-clock" id="sb-clock"></div>
+    <div class="sb-upd" id="sb-upd"></div>
+  </div>
+</nav>
+
+<!-- ══ MOBILE TOP BAR ══ -->
+<div class="topbar">
+  <div class="tb-logo">
+    <div class="dot"></div>
+    <span class="tb-txt">US Portfolio</span>
+    <span class="tb-month" id="tb-month"></span>
+  </div>
+  <span class="tb-clock" id="tb-clock"></span>
+</div>
+
+<div class="main">
+
+  <!-- ═══ HOME ═══ -->
+  <div class="sec on" id="s-home">
+    <div class="phdr">
+      <div class="ptitle">US Long-Term Portfolio</div>
+      <div class="psub" id="home-sub">로딩 중…</div>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <div class="home-grid">
+      <div class="cc">
+        <div class="ctitle">성과 추이 — 포트폴리오 vs SPY vs QQQ</div>
+        <div class="cf">
+          <span class="cf-lbl">기간</span>
+          <button class="cfbtn" onclick="setRange('1M','home')">1M</button>
+          <button class="cfbtn" onclick="setRange('3M','home')">3M</button>
+          <button class="cfbtn" onclick="setRange('6M','home')">6M</button>
+          <button class="cfbtn on" id="cfbtn-home-ALL" onclick="setRange('ALL','home')">ALL</button>
+        </div>
+        <canvas id="ch-home" height="220"></canvas>
+      </div>
+      <div class="card home-list">
+        <div class="ctitle">보유 종목</div>
+        <div class="desk-tbl tw" id="home-tbl"></div>
+        <div class="mcards" id="home-cards"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PORTFOLIO ═══ -->
+  <div class="sec" id="s-port">
+    <div class="phdr"><div class="ptitle">포트폴리오 현황</div></div>
+    <div class="port-grid">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <div class="ctitle">섹터 배분</div>
+          <canvas id="ch-sector" height="260"></canvas>
+        </div>
+        <div class="card">
+          <div class="ctitle">섹터 목록</div>
+          <ul class="slist" id="slist"></ul>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ctitle">보유 종목 상세</div>
+        <div class="desk-tbl tw" id="port-tbl"></div>
+        <div class="mcards" id="port-cards"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ PERFORMANCE ═══ -->
+  <div class="sec" id="s-perf">
+    <div class="phdr"><div class="ptitle">성과 분석</div></div>
+    <div class="cc mb16">
+      <div class="ctitle">누적 수익률 추이</div>
+      <div class="cf">
+        <span class="cf-lbl">기간</span>
+        <button class="cfbtn" onclick="setRange('1M','perf')">1M</button>
+        <button class="cfbtn" onclick="setRange('3M','perf')">3M</button>
+        <button class="cfbtn" onclick="setRange('6M','perf')">6M</button>
+        <button class="cfbtn on" id="cfbtn-perf-ALL" onclick="setRange('ALL','perf')">ALL</button>
+      </div>
+      <canvas id="ch-perf" height="200"></canvas>
+    </div>
+    <div class="g3" id="perf-kpis"></div>
+    <div class="card">
+      <div class="ctitle">성과 이력</div>
+      <div class="tw" id="perf-tbl"></div>
+    </div>
+  </div>
+
+  <!-- ═══ RISK ═══ -->
+  <div class="sec" id="s-risk">
+    <div class="phdr"><div class="ptitle">리스크 모니터링</div></div>
+    <div class="risk-grid">
+      <div class="card" style="text-align:center">
+        <div class="ctitle">MDD 모니터</div>
+        <div id="mdd-gauge"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <div class="ctitle">VIX 레짐</div>
+          <div id="vix-regime"></div>
+          <div class="tw"><table>
+            <tr><th>레짐</th><th>조건</th><th>현금비중</th></tr>
+            <tr><td>🟢 정상</td><td>VIX &lt; 30</td><td>30%</td></tr>
+            <tr><td>🟡 주의</td><td>VIX ≥ 30</td><td>50%</td></tr>
+            <tr><td>🔴 공포</td><td>VIX ≥ 40</td><td>60%</td></tr>
+          </table></div>
+        </div>
+        <div class="card">
+          <div class="ctitle">스톱로스 현황</div>
+          <div id="sl-alerts"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card mb16">
+      <div class="ctitle">진입가 기준 스톱로스 가격표</div>
+      <div class="tw" id="sl-tbl"></div>
+    </div>
+    <div class="card">
+      <div class="ctitle">종목별 스코어 분석</div>
+      <canvas id="ch-score" height="220"></canvas>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- ══ MOBILE BOTTOM NAV ══ -->
+<nav class="mnav">
+  <div class="mnavitems">
+    <button class="mnavitem on" onclick="go('home')"><span class="mic">🏠</span><span>홈</span></button>
+    <button class="mnavitem"   onclick="go('port')"><span class="mic">📊</span><span>포트폴리오</span></button>
+    <button class="mnavitem"   onclick="go('perf')"><span class="mic">📈</span><span>성과</span></button>
+    <button class="mnavitem"   onclick="go('risk')"><span class="mic">⚠️</span><span>리스크</span></button>
+  </div>
+</nav>
+
+<script>
+const TK='__TOKEN__';
+const SCOL={
+  'Technology':'#6366f1','Communication Services':'#00C6A9',
+  'Energy':'#f59e0b','Basic Materials':'#f97316',
+  'Healthcare':'#22c55e','Consumer Discretionary':'#ec4899',
+  'Financials':'#3b82f6','Industrials':'#8b5cf6',
+  'Cash':'#374151','Unknown':'#94a3b8'
+};
+let D=null,CHS={},RANGE={home:'ALL',perf:'ALL'};
+
+const fp=(v,s=true)=>v==null||isNaN(v)?'—':(s&&v>0?'+':'')+v.toFixed(2)+'%';
+const fm=v=>v==null?'—':'$'+v.toFixed(2);
+const fc=v=>v>0?'pos':v<0?'neg':'';
+
+function go(name){
+  document.querySelectorAll('.sec').forEach(e=>e.classList.remove('on'));
+  document.querySelectorAll('.snitem,.mnavitem').forEach(e=>e.classList.remove('on'));
+  document.getElementById('s-'+name).classList.add('on');
+  document.querySelectorAll('[onclick="go(\''+name+'\')"]').forEach(e=>e.classList.add('on'));
+  if(name==='port' && !CHS.sector) renderSector();
+  if(name==='perf' && !CHS.perf)  renderPerfChart('ch-perf','perf');
+  if(name==='risk' && !CHS.score) renderScore();
+}
+
+async function load(){
+  try{
+    const r=await fetch('/api/data?token='+TK);
+    if(!r.ok) throw new Error();
+    D=await r.json(); render();
+  }catch{
+    document.querySelector('.main').innerHTML=
+      '<div style="text-align:center;padding:80px;color:#ef4444">데이터 로드 실패</div>';
+  }
+}
+
+function render(){
+  if(!D)return;
+  const{portfolio:p,performance:pf,updated}=D;
+  const holdings=p.holdings||[];
+  const stocks=holdings.filter(h=>h.ticker!=='CASH');
+  const cash=holdings.find(h=>h.ticker==='CASH');
+  const cw=cash?cash.weight:30;
+  const recs=pf.records||[];
+  const checks=recs.filter(r=>r.type==='performance_check'&&r.portfolio_ret_pct!=null);
+  const lat=checks.slice(-1)[0];
+  const pr=lat?lat.portfolio_ret_pct:0;
+  const sr=lat?lat.spy_ret_pct:null;
+  const qr=lat?lat.qqq_ret_pct:null;
+  const al=lat?lat.alpha_vs_spy:null;
+
+  // nav labels
+  const mon=p.month||'';
+  document.getElementById('sb-month').textContent=mon;
+  document.getElementById('tb-month').textContent=mon?'  '+mon:'';
+  document.getElementById('sb-upd').textContent='갱신 '+updated;
+  document.getElementById('home-sub').textContent=
+    `리밸런싱 월: ${mon||'—'} | ${stocks.length}종목 + 현금 ${cw}%`;
+
+  // KPIs
+  const prev=checks.slice(-2,-1)[0];
+  const deltaPr=prev?pr-prev.portfolio_ret_pct:null;
+  const ks=[
+    {l:'포트폴리오 수익률',v:fp(pr),c:fc(pr),
+      s:deltaPr!=null?`전일比 ${fp(deltaPr)}`:'최근 성과 체크'},
+    {l:'Alpha vs SPY',v:al!=null?fp(al)+'p':'—',c:fc(al),s:'SPY '+fp(sr)},
+    {l:'Alpha vs QQQ',v:qr!=null?fp(pr-qr)+'p':'—',c:fc(qr!=null?pr-qr:0),s:'QQQ '+fp(qr)},
+    {l:'보유 종목',v:stocks.length+'종목',c:'neu',
+      s:new Set(stocks.map(h=>h.sector)).size+'개 섹터'},
+    {l:'현금 비중',v:cw+'%',c:cw>30?'neg':'neu',
+      s:cw>30?'VIX 방어 중':'기본 비중'},
+  ];
+  document.getElementById('kpis').innerHTML=ks.map(k=>
+    `<div class="kpi"><div class="klabel">${k.l}</div>
+     <div class="kval ${k.c}">${k.v}</div>
+     <div class="ksub">${k.s}</div></div>`
+  ).join('');
+
+  renderTable('home-tbl',holdings,false);
+  renderCards('home-cards',holdings);
+  renderTable('port-tbl',holdings,true);
+  renderCards('port-cards',holdings);
+  renderSectorList(holdings);
+  renderPerfKPIs(checks);
+  renderPerfHistTable(recs);
+  renderRisk(p,holdings,cw);
+  renderPerfChart('ch-home','home');
+}
+
+/* ── DATE FILTER ── */
+function filterByRange(recs,range){
+  if(range==='ALL')return recs;
+  const days={'1M':30,'3M':90,'6M':180}[range]||9999;
+  const cut=new Date(Date.now()-days*864e5);
+  return recs.filter(r=>new Date(r.date)>=cut);
+}
+function setRange(range,key){
+  RANGE[key]=range;
+  ['1M','3M','6M','ALL'].forEach(r=>{
+    const b=document.getElementById(`cfbtn-${key}-${r}`);
+    if(b) b.classList.toggle('on',r===range);
+  });
+  delete CHS[key];
+  renderPerfChart('ch-'+key,key);
+}
+
+/* ── LINE CHART (chart + rebalancing markers) ── */
+function renderPerfChart(canvasId,key){
+  if(!D)return;
+  const ctx=document.getElementById(canvasId);
+  if(!ctx)return;
+  const allRecs=D.performance.records||[];
+  const rebalDates=allRecs.filter(r=>r.type==='rebalancing').map(r=>r.date);
+  const perfRecs=filterByRange(
+    allRecs.filter(r=>r.type!=='rebalancing'&&r.portfolio_ret_pct!=null),
+    RANGE[key]||'ALL'
+  );
+  if(!perfRecs.length){if(CHS[key])CHS[key].destroy();delete CHS[key];return;}
+
+  const firstDate=perfRecs[0].date, lastDate=perfRecs[perfRecs.length-1].date;
+  // 리밸런싱 날짜를 labels에 삽입해 순서 보장, 데이터는 null
+  const rebalIn=rebalDates.filter(d=>d>firstDate&&d<lastDate);
+  const allDates=[...new Set([...perfRecs.map(r=>r.date),...rebalIn])].sort();
+  const pm=Object.fromEntries(perfRecs.map(r=>[r.date,r]));
+
+  const annotations={};
+  rebalIn.forEach((d,i)=>{
+    annotations['r'+i]={type:'line',xMin:d,xMax:d,
+      borderColor:'rgba(99,102,241,.55)',borderWidth:1.5,borderDash:[4,4],
+      label:{display:true,content:'리밸',position:'start',
+        font:{size:9,weight:'bold'},color:'#818cf8',
+        backgroundColor:'rgba(99,102,241,.12)',
+        padding:{x:4,y:2},yAdjust:-4}};
+  });
+
+  if(CHS[key])CHS[key].destroy();
+  const big=allDates.length>60;
+  CHS[key]=new Chart(ctx,{
+    type:'line',
+    data:{labels:allDates,datasets:[
+      {label:'포트폴리오',
+       data:allDates.map(d=>pm[d]?.portfolio_ret_pct??null),
+       borderColor:'#00C6A9',backgroundColor:'rgba(0,198,169,.1)',
+       borderWidth:2.5,pointRadius:big?0:5,fill:true,tension:.3,spanGaps:true},
+      {label:'SPY',
+       data:allDates.map(d=>pm[d]?.spy_ret_pct??null),
+       borderColor:'#6366f1',backgroundColor:'transparent',
+       borderWidth:1.5,borderDash:[6,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
+      {label:'QQQ',
+       data:allDates.map(d=>pm[d]?.qqq_ret_pct??null),
+       borderColor:'#f59e0b',backgroundColor:'transparent',
+       borderWidth:1.5,borderDash:[3,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
+    ]},
+    options:{responsive:true,
+      plugins:{
+        legend:{labels:{color:'#94a3b8',font:{size:12}}},
+        tooltip:{mode:'index',intersect:false,
+          filter:i=>i.raw!=null,
+          callbacks:{label:c=>` ${c.dataset.label}: ${c.raw!=null?c.raw.toFixed(2)+'%':'—'}`}},
+        annotation:{annotations}},
+      scales:{
+        x:{ticks:{color:'#64748b',maxTicksLimit:8},grid:{color:'#1E2840'}},
+        y:{ticks:{color:'#64748b',callback:v=>v+'%'},grid:{color:'#1E2840'}}
+      }}
+  });
+}
+
+/* ── SECTOR DONUT ── */
+function renderSector(){
+  if(!D)return;
+  const ctx=document.getElementById('ch-sector');
+  const wts={};
+  (D.portfolio.holdings||[]).forEach(h=>{const s=h.sector||'Unknown';wts[s]=(wts[s]||0)+h.weight});
+  const ent=Object.entries(wts).sort((a,b)=>b[1]-a[1]);
+  if(CHS.sector)CHS.sector.destroy();
+  CHS.sector=new Chart(ctx,{type:'doughnut',
+    data:{labels:ent.map(([s])=>s),
+      datasets:[{data:ent.map(([,w])=>w),
+        backgroundColor:ent.map(([s])=>SCOL[s]||'#94a3b8'),
+        borderColor:'#0B0E17',borderWidth:2,hoverOffset:10}]},
+    options:{responsive:true,cutout:'58%',
+      plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:c=>` ${c.label}: ${c.raw.toFixed(1)}%`}}}}
+  });
+}
+
+/* ── SECTOR LIST ── */
+function renderSectorList(holdings){
+  const wts={};
+  holdings.forEach(h=>{const s=h.sector||'Unknown';wts[s]=(wts[s]||0)+h.weight});
+  const el=document.getElementById('slist');
+  if(!el)return;
+  el.innerHTML=Object.entries(wts).sort((a,b)=>b[1]-a[1]).map(([s,w])=>
+    `<li class="si"><div class="sdot" style="background:${SCOL[s]||'#94a3b8'}"></div>
+     <span class="sname">${s}</span><span class="spct">${w.toFixed(1)}%</span></li>`
+  ).join('');
+}
+
+/* ── DESKTOP TABLE ── */
+function renderTable(id,holdings,detail){
+  const el=document.getElementById(id);if(!el)return;
+  const hdr=detail
+    ?'<tr><th></th><th>티커</th><th>종목명</th><th>섹터</th><th>비중</th><th>스코어</th><th>진입가</th><th>ROE%</th><th>마진%</th><th>6M수익</th><th>52W위치</th></tr>'
+    :'<tr><th>티커</th><th>종목명</th><th>비중</th><th>스코어</th><th>진입가</th></tr>';
+  const rows=holdings.map(h=>{
+    const wb=`<div class="wb"><div class="wbg"><div class="wbf" style="width:${Math.min(h.weight/15*100,100)}%"></div></div><span class="wpct">${h.weight.toFixed(1)}%</span></div>`;
+    const sc=h.score>=80?'pos':h.score>=60?'':'neg';
+    if(detail)return`<tr>
+      <td>${h.data_stale?'⚠️':'✅'}</td>
+      <td><b style="color:var(--pr)">${h.ticker}</b></td>
+      <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;color:var(--mu)">${h.name}</td>
+      <td><span class="badge bb">${h.sector||'—'}</span></td>
+      <td>${wb}</td>
+      <td>${h.score?`<span class="${sc}">${h.score.toFixed(1)}</span>`:'—'}</td>
+      <td style="color:var(--mu)">${fm(h.entry_price)}</td>
+      <td class="${fc(h.roe)}">${h.roe?h.roe.toFixed(1)+'%':'—'}</td>
+      <td>${h.margin?h.margin.toFixed(1)+'%':'—'}</td>
+      <td class="${fc(h.ret_6m)}">${h.ret_6m?fp(h.ret_6m):'—'}</td>
+      <td>${h.w52_pos?h.w52_pos.toFixed(1)+'%':'—'}</td></tr>`;
+    return`<tr>
+      <td><b style="color:var(--pr)">${h.ticker}</b></td>
+      <td style="color:var(--mu);font-size:12px">${h.name}</td>
+      <td>${wb}</td>
+      <td>${h.score?`<span class="${sc}">${h.score.toFixed(1)}</span>`:'—'}</td>
+      <td style="color:var(--mu)">${fm(h.entry_price)}</td></tr>`;
+  }).join('');
+  el.innerHTML=`<table><thead>${hdr}</thead><tbody>${rows}</tbody></table>`;
+}
+
+/* ── MOBILE CARDS ── */
+function renderCards(id,holdings){
+  const el=document.getElementById(id);if(!el)return;
+  el.innerHTML=holdings.filter(h=>h.ticker!=='CASH').map(h=>{
+    const sc=h.score>=80?'pos':h.score>=60?'neu':'neg';
+    const wp=Math.min(h.weight/15*100,100);
+    return`<div class="mcard">
+      <div class="mcard-head">
+        <div><div class="mcard-ticker">${h.ticker}</div>
+          <div class="mcard-name">${h.name}</div></div>
+        <div><div class="mcard-score-val ${sc}">${h.score?h.score.toFixed(1):'—'}</div>
+          <div class="mcard-score-lbl">스코어</div></div>
+      </div>
+      <div class="mcard-wbar">
+        <div class="mcard-wlbl"><span>비중</span><span class="mcard-wpct">${h.weight.toFixed(1)}%</span></div>
+        <div class="mcard-wbg"><div class="mcard-wbf" style="width:${wp}%"></div></div>
+      </div>
+      <div class="mcard-grid">
+        <div class="mcard-item"><label>섹터</label>
+          <span><span class="mcard-badge">${(h.sector||'—').replace('Communication Services','Comm.')}</span></span></div>
+        <div class="mcard-item"><label>진입가</label><span style="color:var(--mu)">${fm(h.entry_price)}</span></div>
+        <div class="mcard-item"><label>ROE</label><span class="${fc(h.roe)}">${h.roe?h.roe.toFixed(1)+'%':'—'}</span></div>
+        <div class="mcard-item"><label>6M수익</label><span class="${fc(h.ret_6m)}">${h.ret_6m?fp(h.ret_6m):'—'}</span></div>
+        <div class="mcard-item"><label>순이익률</label><span>${h.margin?h.margin.toFixed(1)+'%':'—'}</span></div>
+        <div class="mcard-item"><label>52W위치</label><span>${h.w52_pos?h.w52_pos.toFixed(1)+'%':'—'}</span></div>
+      </div></div>`;
+  }).join('');
+}
+
+/* ── PERF KPIs ── */
+function renderPerfKPIs(checks){
+  const el=document.getElementById('perf-kpis');if(!el)return;
+  const lat=checks.slice(-1)[0];
+  const alphas=checks.filter(r=>r.alpha_vs_spy!=null).map(r=>r.alpha_vs_spy);
+  const avgA=alphas.length?alphas.reduce((a,b)=>a+b,0)/alphas.length:null;
+  const ks=[
+    {l:'최근 수익률',v:fp(lat?.portfolio_ret_pct),c:fc(lat?.portfolio_ret_pct||0)},
+    {l:'최근 Alpha vs SPY',v:lat?.alpha_vs_spy!=null?fp(lat.alpha_vs_spy)+'p':'—',c:fc(lat?.alpha_vs_spy||0)},
+    {l:'평균 Alpha',v:avgA!=null?fp(avgA)+'p':'—',c:fc(avgA||0)},
+  ];
+  el.innerHTML=ks.map(k=>
+    `<div class="card"><div class="ctitle">${k.l}</div>
+     <div class="kval ${k.c}" style="font-size:28px">${k.v}</div></div>`
+  ).join('');
+}
+
+/* ── PERF HISTORY TABLE ── */
+function renderPerfHistTable(recs){
+  const el=document.getElementById('perf-tbl');if(!el)return;
+  const rows=[...recs].reverse().map(r=>`<tr>
+    <td>${r.date}</td>
+    <td><span class="badge ${r.type==='rebalancing'?'bb':'bt'}">${r.type==='rebalancing'?'리밸런싱':'성과체크'}</span></td>
+    <td class="${fc(r.portfolio_ret_pct)}">${fp(r.portfolio_ret_pct)}</td>
+    <td class="${fc(r.spy_ret_pct)}">${r.spy_ret_pct!=null?fp(r.spy_ret_pct):'—'}</td>
+    <td class="${fc(r.qqq_ret_pct)}">${r.qqq_ret_pct!=null?fp(r.qqq_ret_pct):'—'}</td>
+    <td class="${fc(r.alpha_vs_spy)}">${r.alpha_vs_spy!=null?fp(r.alpha_vs_spy)+'p':'—'}</td>
+  </tr>`).join('');
+  el.innerHTML=`<table><thead><tr>
+    <th>날짜</th><th>구분</th><th>포트폴리오</th><th>SPY</th><th>QQQ</th><th>Alpha</th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+/* ── RISK ── */
+function renderRisk(p,holdings,cw){
+  const me=p.max_equity||0, MDD=-15;
+  const pct=Math.min(Math.max((me+30)/60,0),1), angle=pct*180;
+  const col=me>=0?'#22c55e':me>-10?'#f59e0b':me>MDD?'#f97316':'#ef4444';
+  const rad=(angle-180)*Math.PI/180;
+  const ex=(100+80*Math.cos(rad)).toFixed(1), ey=(100+80*Math.sin(rad)).toFixed(1);
+  const la=angle>180?1:0;
+  document.getElementById('mdd-gauge').innerHTML=`
+    <div class="gauge-wrap">
+      <svg viewBox="0 0 200 110" style="width:210px">
+        <path d="M20,100 A80,80 0 0,1 180,100" fill="none" stroke="#1E2840" stroke-width="14" stroke-linecap="round"/>
+        <path d="M20,100 A80,80 0 0,1 60,27"  fill="none" stroke="#ef4444" stroke-width="14" opacity=".3" stroke-linecap="butt"/>
+        <path d="M60,27 A80,80 0 0,1 100,20"  fill="none" stroke="#f97316" stroke-width="14" opacity=".3" stroke-linecap="butt"/>
+        <path d="M100,20 A80,80 0 0,1 180,100" fill="none" stroke="#22c55e" stroke-width="14" opacity=".3" stroke-linecap="round"/>
+        ${angle>0?`<path d="M20,100 A80,80 0 ${la},1 ${ex},${ey}" fill="none" stroke="${col}" stroke-width="14" stroke-linecap="round"/>`:''}
+        <circle cx="${ex}" cy="${ey}" r="7" fill="${col}"/>
+      </svg>
+      <div class="gval" style="color:${col}">${fp(me)}</div>
+      <div class="glabel">MDD 기준 수익률 | 경보: ${MDD}%</div>
+    </div>`;
+
+  const [rcl,rl,re]=cw>=50?['r-fear','공포','🔴']:cw>=40?['r-caution','주의','🟡']:['r-normal','정상','🟢'];
+  document.getElementById('vix-regime').innerHTML=
+    `<div class="regime ${rcl}"><div class="rlabel">${re} ${rl}</div>
+     <div class="rsub">현금 비중: ${cw}%</div></div>`;
+
+  const alerted=p.last_stoploss_alerts||{};
+  document.getElementById('sl-alerts').innerHTML=Object.keys(alerted).length
+    ?Object.entries(alerted).map(([t,d])=>
+        `<div class="al al-err">🔴 <b>${t}</b> — 알림: ${d}</div>`).join('')
+    :'<div class="al al-ok">✅ 이번 달 스톱로스 알림 없음</div>';
+
+  const SL=-15,WN=-10;
+  const stocks=holdings.filter(h=>h.ticker!=='CASH');
+  document.getElementById('sl-tbl').innerHTML=`<table><thead><tr>
+    <th></th><th>티커</th><th>종목명</th><th>진입가</th>
+    <th>경고(${WN}%)</th><th>스톱로스(${SL}%)</th><th>진입일</th>
+  </tr></thead><tbody>${stocks.map(h=>{
+    const ep=h.entry_price||0;
+    return`<tr><td>${h.ticker in alerted?'🔴':'✅'}</td>
+      <td><b style="color:var(--pr)">${h.ticker}</b></td>
+      <td style="color:var(--mu)">${h.name}</td>
+      <td>${fm(ep)}</td>
+      <td style="color:var(--gd)">${fm(ep*(1+WN/100))}</td>
+      <td style="color:var(--rd)">${fm(ep*(1+SL/100))}</td>
+      <td style="color:var(--mu)">${h.entry_date||'—'}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+/* ── SCORE CHART ── */
+function renderScore(){
+  if(!D)return;
+  const ctx=document.getElementById('ch-score');if(!ctx)return;
+  const stocks=(D.portfolio.holdings||[]).filter(h=>h.ticker!=='CASH')
+    .sort((a,b)=>(b.score||0)-(a.score||0));
+  const fin=stocks.map(h=>{
+    let s=0;
+    if(h.roe>=40)s+=10;else if(h.roe>=25)s+=8;else if(h.roe>=15)s+=5;else s+=2;
+    if(h.margin>=30)s+=10;else if(h.margin>=20)s+=8;else if(h.margin>=10)s+=5;else s+=2;
+    if(h.fcf_margin>=20)s+=10;else if(h.fcf_margin>=10)s+=8;else if(h.fcf_margin>=0)s+=5;
+    if(h.rev_growth>=20)s+=10;else if(h.rev_growth>=10)s+=7;else if(h.rev_growth>=0)s+=4;
+    return Math.min(s,40);
+  });
+  const tec=stocks.map(h=>h.w52_pos>=80?20:h.w52_pos>=60?15:h.w52_pos>=40?10:5);
+  const mom=stocks.map((h,i)=>Math.max((h.score||0)-fin[i]-tec[i],0));
+  if(CHS.score)CHS.score.destroy();
+  CHS.score=new Chart(ctx,{type:'bar',
+    data:{labels:stocks.map(h=>h.ticker),datasets:[
+      {label:'재무품질(40pt)',data:fin,backgroundColor:'#6366f1'},
+      {label:'기술적(20pt)', data:tec,backgroundColor:'#22c55e'},
+      {label:'모멘텀(40pt)', data:mom,backgroundColor:'#f59e0b'},
+    ]},
+    options:{indexAxis:'y',responsive:true,
+      plugins:{legend:{labels:{color:'#94a3b8',font:{size:12}}}},
+      scales:{
+        x:{stacked:true,max:105,ticks:{color:'#64748b'},grid:{color:'#1E2840'}},
+        y:{stacked:true,ticks:{color:'#e2e8f0',font:{weight:'bold'}},grid:{display:false}}
+      }}
+  });
+}
+
+// 시계
+setInterval(()=>{
+  const t=new Date().toLocaleTimeString('ko-KR');
+  const a=document.getElementById('sb-clock');
+  const b=document.getElementById('tb-clock');
+  if(a)a.textContent=t;if(b)b.textContent=t;
+},1000);
+
+load();
+setInterval(load,300_000);
+</script>
+</body>
+</html>
+"""
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8502)

@@ -167,7 +167,7 @@ for h in data['holdings']:
   # ── 대시보드 설치 ─────────────────────────────
   dashboard-install)
     info "=== 대시보드 설치 ==="
-    info "대시보드 패키지 설치..."
+    info "FastAPI 패키지 설치..."
     "$VENV_DIR/bin/pip" install -r "$BOT_DIR/requirements_dashboard.txt" -q
     info "systemd 서비스 등록..."
     cp "$BOT_DIR/dashboard.service" /etc/systemd/system/"$DASHBOARD_SERVICE".service
@@ -176,7 +176,8 @@ for h in data['holdings']:
     systemctl start "$DASHBOARD_SERVICE"
     sleep 2
     systemctl status "$DASHBOARD_SERVICE" --no-pager | head -10
-    info "대시보드 접속: http://$(hostname -I | awk '{print $1}'):8502/?token=scanner2024"
+    local_ip=$(hostname -I | awk '{print $1}')
+    info "대시보드 접속: http://${local_ip}:8502/?token=scanner2024"
     ;;
 
   # ── 대시보드 시작/중지/재시작/상태 ──────────
@@ -187,7 +188,7 @@ for h in data['holdings']:
       restart) systemctl restart "$DASHBOARD_SERVICE" && info "대시보드 재시작됨" ;;
       status)  systemctl status "$DASHBOARD_SERVICE" --no-pager ;;
       *)
-        info "대시보드 명령어: start | stop | restart | status"
+        info "사용법: bash manage.sh dashboard [start|stop|restart|status]"
         ;;
     esac
     ;;
@@ -216,7 +217,7 @@ for h in data['holdings']:
     echo "  rebal               강제 리밸런싱 재실행"
     echo "  update              업데이트 방법 안내"
     echo ""
-    echo "  dashboard-install   대시보드 최초 설치 (패키지 + systemd 등록)"
+    echo "  dashboard-install   대시보드 최초 설치 (FastAPI + systemd 등록)"
     echo "  dashboard start     대시보드 시작"
     echo "  dashboard stop      대시보드 중지"
     echo "  dashboard restart   대시보드 재시작"
