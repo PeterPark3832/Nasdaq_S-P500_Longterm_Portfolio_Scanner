@@ -891,10 +891,10 @@ function setRange(range,key){
   const sub=document.getElementById(`chart-${key}-sub`);
   if(sub){
     const labels={
-      'ALL':'ALL — 포트폴리오: 진입가 기준 / SPY·QQQ: 동기간 비교 (리밸↺ 기준 리셋)',
-      '1M':'최근 1개월 — 기간 시작 기준 0% 리베이스',
-      '3M':'최근 3개월 — 기간 시작 기준 0% 리베이스',
-      '6M':'최근 6개월 — 기간 시작 기준 0% 리베이스',
+      'ALL':'전체 기간 — 포트폴리오 첫 측정일 기준 0% 리베이스 (3M·6M 데이터 부족 시 동일)',
+      '1M':'최근 1개월 — 포트폴리오 첫 측정일 기준 0% 리베이스',
+      '3M':'최근 3개월 — 포트폴리오 첫 측정일 기준 0% 리베이스',
+      '6M':'최근 6개월 — 포트폴리오 첫 측정일 기준 0% 리베이스',
     };
     sub.textContent=labels[range]||'';
   }
@@ -932,49 +932,22 @@ function renderPerfChart(canvasId,key){
 
   let allDates, portData, spyData, qqqData;
 
-  if(range==='ALL'){
-    // ── ALL 뷰: 저장된 spy_ret_pct 사용 (포트폴리오와 동일 월별 기준)
-    // 포트폴리오 점검 날짜만 X축 사용 (BM 섞으면 기준점 혼재)
-    // 현재 월(마지막 리밸 이후)은 BM으로 보완
-    const bmCurr=Object.fromEntries(
-      (BM?.spy||[]).filter(p=>p.date>=lastRebal).map(p=>[p.date,p.ret])
-    );
-    const qqqCurr=Object.fromEntries(
-      (BM?.qqq||[]).filter(p=>p.date>=lastRebal).map(p=>[p.date,p.ret])
-    );
-    // BM 현재월 리베이스 (마지막 리밸 = 0%)
-    function rebaseCurr(map){
-      const sorted=Object.keys(map).sort();
-      if(!sorted.length)return{};
-      const base=map[sorted[0]];
-      return Object.fromEntries(sorted.map(d=>[d,parseFloat((map[d]-base).toFixed(2))]));
-    }
-    const spyCurr=rebaseCurr(bmCurr);
-    const qqqCurr2=rebaseCurr(qqqCurr);
-
-    const pfDates=perfRecs.map(r=>r.date);
-    const currBmDates=Object.keys(spyCurr).filter(d=>!pfDates.includes(d)).sort();
-    allDates=[...new Set([...pfDates,...currBmDates])].sort();
-
-    portData=allDates.map(d=>pm[d]?.portfolio_ret_pct??null);
-    spyData =allDates.map(d=>pm[d]?.spy_ret_pct??spyCurr[d]??null);
-    qqqData =allDates.map(d=>pm[d]?.qqq_ret_pct??qqqCurr2[d]??null);
-
-  } else {
-    // ── 1M/3M/6M 뷰: 포트폴리오 첫 체크일부터 공정 비교
-    // BM이 cutDate부터 시작하면 포트폴리오보다 먼저 시작해 유리 → 포트폴리오 첫 측정일 기준으로 맞춤
+  {
+    // ── 모든 뷰 동일 로직: 포트폴리오 첫 체크일 기준 0% 리베이스
+    // ALL/3M/6M: 데이터가 짧으면 동일한 차트 (논리적으로 맞음)
+    // 1M: 최근 30일 포트폴리오 체크부터 시작
     const spyMapAll=Object.fromEntries((BM?.spy||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
     const qqqMapAll=Object.fromEntries((BM?.qqq||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
     const pfDates=perfRecs.map(r=>r.date);
 
-    // 포트폴리오 첫 측정일 = 공정 비교 시작점
+    // 포트폴리오 첫 측정일 = 공정 비교 시작점 (BM도 같은 날부터)
     const pfStart=pfDates[0]||cutDate;
     const spyMap=Object.fromEntries(Object.entries(spyMapAll).filter(([d])=>d>=pfStart));
     const qqqMap=Object.fromEntries(Object.entries(qqqMapAll).filter(([d])=>d>=pfStart));
     const bmDates=Object.keys(spyMap).sort();
     allDates=[...new Set([...pfDates,...bmDates])].sort();
 
-    // 모든 선을 동일 시작점(포트폴리오 첫 측정일)에서 0%로 리베이스
+    // 모든 선을 동일 시작점에서 0%로 리베이스
     portData=rebase(allDates.map(d=>pm[d]?.portfolio_ret_pct??null));
     spyData =rebase(allDates.map(d=>spyMap[d]??null));
     qqqData =rebase(allDates.map(d=>qqqMap[d]??null));
