@@ -19,3 +19,19 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Server admin scripts (contain credentials - do not commit)
+patch_server.py
+patch_dashboard.py
+patch_js.py
+fix_base.py
+build_changes.py
+resend_telegram.py
+sync_from_server.py
+check_status.py
+verify_final.py
+verify_restart.py
+
+# Generated runtime data
+rebalancing_changes.json
+portfolio_prev_us.json

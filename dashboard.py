@@ -57,19 +57,15 @@ def api_benchmark(token: str = "", start: str = ""):
         def _extract_close(sym: str) -> pd.Series:
             """Multi/single-index 모두 처리"""
             if isinstance(raw.columns, pd.MultiIndex):
-                # (Price, Ticker) 구조
                 if ("Close", sym) in raw.columns:
                     return raw[("Close", sym)].dropna()
-                # (Ticker, Price) 구조
                 if (sym, "Close") in raw.columns:
                     return raw[(sym, "Close")].dropna()
-                # group_by="ticker" 없이 내려온 경우 직접 접근
                 try:
                     return raw[sym]["Close"].dropna()
                 except Exception:
                     return pd.Series(dtype=float)
             else:
-                # 단일 종목이면 flat columns
                 if "Close" in raw.columns:
                     return raw["Close"].dropna()
                 return pd.Series(dtype=float)
@@ -99,6 +95,26 @@ def api_benchmark(token: str = "", start: str = ""):
     except Exception as e:
         log.warning(f"/api/benchmark error: {e}")
         return JSONResponse({"spy": [], "qqq": [], "start_date": start, "updated": "", "error": str(e)})
+
+@app.get("/api/logs")
+def api_logs(token: str = "", n: int = 300):
+    if token != TOKEN: raise HTTPException(401)
+    log_file = BASE / "longterm_scanner_us.log"
+    try:
+        lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        return JSONResponse({"lines": lines[-n:], "total": len(lines)})
+    except:
+        return JSONResponse({"lines": [], "total": 0})
+
+@app.get("/api/changes")
+def api_changes(token: str = ""):
+    if token != TOKEN: raise HTTPException(401)
+    return JSONResponse({
+        "changes":      _load("rebalancing_changes.json") or {},
+        "prev":         _load("portfolio_prev_us.json") or {},
+        "current":      _load("portfolio_state_us.json") or {},
+        "updated":      datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
 
 @app.get("/", response_class=HTMLResponse)
 def index(token: str = ""):
@@ -319,6 +335,54 @@ tr:last-child td{border-bottom:none}
 @media(max-width:420px){
   .kpis{grid-template-columns:1fr 1fr}
 }
+
+/* ══ LOG VIEWER ══ */
+.log-wrap{background:#0a0d14;border:1px solid var(--bd);border-radius:10px;
+  padding:14px;font-family:"JetBrains Mono","Fira Code",monospace;
+  font-size:11px;line-height:1.6;max-height:600px;overflow-y:auto}
+.log-line{white-space:pre-wrap;word-break:break-all;padding:1px 0}
+.log-err{color:#ef4444}.log-warn{color:#f59e0b}
+.log-info{color:#94a3b8}.log-ok{color:#22c55e}
+.log-ctrl{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.log-badge{font-size:10px;padding:3px 8px;border-radius:4px;font-weight:700;cursor:pointer;border:none}
+.lb-all{background:#1e2840;color:#94a3b8}.lb-err{background:rgba(239,68,68,.15);color:#ef4444}
+.lb-ok{background:rgba(34,197,94,.12);color:#22c55e}
+.log-refresh{margin-left:auto;padding:5px 14px;border-radius:6px;border:1px solid var(--bd);
+  background:transparent;color:var(--mu);font-size:12px;cursor:pointer;transition:all .15s}
+.log-refresh:hover{background:var(--s2);color:var(--tx)}
+
+/* ══ CHANGE CARDS ══ */
+.ch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:16px}
+.ch-card{background:var(--s2);border-radius:10px;padding:14px 16px;border-left:3px solid}
+.ch-new{border-color:#22c55e}.ch-exit{border-color:#ef4444}
+.ch-up{border-color:#6366f1}.ch-dn{border-color:#f59e0b}.ch-keep{border-color:#374151}
+.ch-ticker{font-size:16px;font-weight:800;margin-bottom:2px}
+.ch-name{font-size:11px;color:var(--mu);margin-bottom:8px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-row{display:flex;justify-content:space-between;font-size:12px;margin-top:4px}
+.ch-label{color:var(--mu)}.ch-val{font-weight:600}
+.chg-hdr{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.chg-title{font-size:13px;font-weight:700}
+.chg-cnt{font-size:11px;background:var(--s2);padding:2px 8px;border-radius:20px;color:var(--mu)}
+
+/* ══ ROADMAP ══ */
+.rm-section{margin-bottom:24px}
+.rm-title{font-size:13px;font-weight:700;color:var(--mu);text-transform:uppercase;
+  letter-spacing:.07em;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--bd)}
+.rm-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid rgba(30,40,64,.5)}
+.rm-item:last-child{border-bottom:none}
+.rm-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.rm-done{background:#22c55e}.rm-wip{background:#f59e0b}.rm-plan{background:#6366f1}.rm-idea{background:#374151}
+.rm-body{flex:1}
+.rm-name{font-size:14px;font-weight:600;margin-bottom:3px}
+.rm-desc{font-size:12px;color:var(--mu);line-height:1.5}
+.rm-tag{display:inline-block;font-size:10px;padding:1px 7px;border-radius:10px;
+  font-weight:700;margin-top:5px}
+.rm-tag-done{background:rgba(34,197,94,.12);color:#22c55e}
+.rm-tag-wip{background:rgba(245,158,11,.12);color:#f59e0b}
+.rm-tag-plan{background:rgba(99,102,241,.12);color:#6366f1}
+.rm-tag-idea{background:rgba(55,65,81,.3);color:#94a3b8}
+
 </style>
 </head>
 <body>
@@ -335,6 +399,9 @@ tr:last-child td{border-bottom:none}
     <li class="snitem"    onclick="go('port')"><span class="ic">📊</span>포트폴리오</li>
     <li class="snitem"    onclick="go('perf')"><span class="ic">📈</span>성과 분석</li>
     <li class="snitem"    onclick="go('risk')"><span class="ic">⚠️</span>리스크</li>
+    <li class="snitem"    onclick="go('changes')"><span class="ic">🔄</span>변경 내역</li>
+    <li class="snitem"    onclick="go('logs')"><span class="ic">📋</span>로그</li>
+    <li class="snitem"    onclick="go('roadmap')"><span class="ic">🗺️</span>로드맵</li>
   </ul>
   <div class="sb-footer">
     <div class="sb-clock" id="sb-clock"></div>
@@ -459,6 +526,131 @@ tr:last-child td{border-bottom:none}
     </div>
   </div>
 
+
+  <!-- ═══ CHANGES ═══ -->
+  <div class="sec" id="s-changes">
+    <div class="phdr">
+      <div class="ptitle">포트폴리오 변경 내역</div>
+      <div class="psub" id="chg-sub">최근 리밸런싱 기준</div>
+    </div>
+    <div class="g3" id="chg-kpis"></div>
+    <div id="chg-new-wrap" class="mb16">
+      <div class="chg-hdr"><span class="chg-title">🟢 신규 편입</span><span class="chg-cnt" id="cnt-new">0종목</span></div>
+      <div class="ch-grid" id="chg-new"></div>
+    </div>
+    <div id="chg-exit-wrap" class="mb16">
+      <div class="chg-hdr"><span class="chg-title">🔴 편출</span><span class="chg-cnt" id="cnt-exit">0종목</span></div>
+      <div class="ch-grid" id="chg-exit"></div>
+    </div>
+    <div id="chg-up-wrap" class="mb16">
+      <div class="chg-hdr"><span class="chg-title">🔼 비중 확대</span><span class="chg-cnt" id="cnt-up">0종목</span></div>
+      <div class="ch-grid" id="chg-up"></div>
+    </div>
+    <div id="chg-dn-wrap" class="mb16">
+      <div class="chg-hdr"><span class="chg-title">🔽 비중 축소</span><span class="chg-cnt" id="cnt-dn">0종목</span></div>
+      <div class="ch-grid" id="chg-dn"></div>
+    </div>
+    <div>
+      <div class="chg-hdr"><span class="chg-title">⚪ 유지</span><span class="chg-cnt" id="cnt-keep">0종목</span></div>
+      <div class="ch-grid" id="chg-keep"></div>
+    </div>
+  </div>
+
+  <!-- ═══ LOGS ═══ -->
+  <div class="sec" id="s-logs">
+    <div class="phdr">
+      <div class="ptitle">봇 로그</div>
+      <div class="psub" id="log-sub">최근 300줄</div>
+    </div>
+    <div class="card">
+      <div class="log-ctrl">
+        <button class="log-badge lb-all" onclick="filterLog('all')">전체</button>
+        <button class="log-badge lb-err" onclick="filterLog('error')">에러</button>
+        <button class="log-badge lb-ok"  onclick="filterLog('info')">INFO</button>
+        <button class="log-refresh" onclick="loadLogs()">새로고침</button>
+      </div>
+      <div class="log-wrap" id="log-box">로딩 중…</div>
+    </div>
+  </div>
+
+  <!-- ═══ ROADMAP ═══ -->
+  <div class="sec" id="s-roadmap">
+    <div class="phdr">
+      <div class="ptitle">로드맵</div>
+      <div class="psub">개발 계획 및 현황</div>
+    </div>
+    <div class="card">
+      <div class="rm-section">
+        <div class="rm-title">✅ 완료</div>
+        <div class="rm-item"><div class="rm-dot rm-done"></div><div class="rm-body">
+          <div class="rm-name">미국주식 롱텀 포트폴리오 봇 v4.11</div>
+          <div class="rm-desc">Nasdaq/S&P500 ~500종목 스캔, 모멘텀+재무 복합 스코어링, 월간 리밸런싱, 텔레그램 브리핑</div>
+          <span class="rm-tag rm-tag-done">완료</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-done"></div><div class="rm-body">
+          <div class="rm-name">FastAPI 대시보드 (현재 버전)</div>
+          <div class="rm-desc">홈/포트폴리오/성과분석/리스크 탭, 실시간 Chart.js 시각화, 모바일 반응형</div>
+          <span class="rm-tag rm-tag-done">완료</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-done"></div><div class="rm-body">
+          <div class="rm-name">VIX 레짐 기반 현금 비중 조절</div>
+          <div class="rm-desc">VIX 30 이상 시 현금 50%, VIX 40 이상 시 60%로 자동 확대</div>
+          <span class="rm-tag rm-tag-done">완료</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-done"></div><div class="rm-body">
+          <div class="rm-name">MDD 모니터링 + 스톱로스 알림</div>
+          <div class="rm-desc">진입가 기준 -20% 도달 시 텔레그램 알림, 대시보드 게이지 시각화</div>
+          <span class="rm-tag rm-tag-done">완료</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-done"></div><div class="rm-body">
+          <div class="rm-name">변경 내역 탭 + 로그 탭</div>
+          <div class="rm-desc">리밸런싱 편입/편출/비중변화 카드뷰, 실시간 봇 로그 조회</div>
+          <span class="rm-tag rm-tag-done">완료</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-done"></div><div class="rm-body">
+          <div class="rm-name">텔레그램 한글 청크 버그 수정</div>
+          <div class="rm-desc">UTF-8 바이트 기준으로 4096 byte 제한 체크 (한글 1자=3bytes)</div>
+          <span class="rm-tag rm-tag-done">완료</span></div></div>
+      </div>
+      <div class="rm-section">
+        <div class="rm-title">🔧 진행 중</div>
+        <div class="rm-item"><div class="rm-dot rm-wip"></div><div class="rm-body">
+          <div class="rm-name">유니버스 품질 개선 — 상장폐지 종목 자동 제거</div>
+          <div class="rm-desc">SPLK, ANSS 등 M&A/상폐 종목이 유니버스에 남아 매월 에러 발생. 자동 정리 로직 추가 예정</div>
+          <span class="rm-tag rm-tag-wip">진행중</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-wip"></div><div class="rm-body">
+          <div class="rm-name">성과 이력 차트 개선</div>
+          <div class="rm-desc">리밸런싱 기준점별 수익률 분리 표시, 진입가 vs 현재가 실시간 수익률</div>
+          <span class="rm-tag rm-tag-wip">진행중</span></div></div>
+      </div>
+      <div class="rm-section">
+        <div class="rm-title">📌 계획</div>
+        <div class="rm-item"><div class="rm-dot rm-plan"></div><div class="rm-body">
+          <div class="rm-name">매매 실행 체크리스트 탭</div>
+          <div class="rm-desc">이번 달 매도 순서 → 매수 순서 가이드, 각 종목 실행 완료 체크 기능</div>
+          <span class="rm-tag rm-tag-plan">계획</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-plan"></div><div class="rm-body">
+          <div class="rm-name">백테스트 결과 시각화</div>
+          <div class="rm-desc">2015~현재 CAGR, 최대 낙폭, 샤프비율 등 백테스트 결과 대시보드에 통합</div>
+          <span class="rm-tag rm-tag-plan">계획</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-plan"></div><div class="rm-body">
+          <div class="rm-name">종목 드릴다운 상세 팝업</div>
+          <div class="rm-desc">티커 클릭 시 재무 상세, 차트, 스코어 근거 팝업으로 표시</div>
+          <span class="rm-tag rm-tag-plan">계획</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-plan"></div><div class="rm-body">
+          <div class="rm-name">알림 설정 (텔레그램 토픽 분리)</div>
+          <div class="rm-desc">리밸런싱/성과/스톱로스 알림을 별도 토픽으로 분리, 대시보드에서 설정</div>
+          <span class="rm-tag rm-tag-plan">계획</span></div></div>
+      </div>
+      <div class="rm-section">
+        <div class="rm-title">💡 아이디어</div>
+        <div class="rm-item"><div class="rm-dot rm-idea"></div><div class="rm-body">
+          <div class="rm-name">멀티 전략 포트폴리오</div>
+          <div class="rm-desc">현재 전략 D 외에 모멘텀 위주 전략 A, 가치주 전략 B 병행 추적</div>
+          <span class="rm-tag rm-tag-idea">아이디어</span></div></div>
+        <div class="rm-item"><div class="rm-dot rm-idea"></div><div class="rm-body">
+          <div class="rm-name">ETF 벤치마크 자동 비교</div>
+          <div class="rm-desc">QQQ/SPY 외에 QQQM, VGT, SOXX 등 섹터 ETF와 성과 비교</div>
+          <span class="rm-tag rm-tag-idea">아이디어</span></div></div>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /main -->
 
 <!-- ══ MOBILE BOTTOM NAV ══ -->
@@ -468,6 +660,9 @@ tr:last-child td{border-bottom:none}
     <button class="mnavitem"   onclick="go('port')"><span class="mic">📊</span><span>포트폴리오</span></button>
     <button class="mnavitem"   onclick="go('perf')"><span class="mic">📈</span><span>성과</span></button>
     <button class="mnavitem"   onclick="go('risk')"><span class="mic">⚠️</span><span>리스크</span></button>
+    <button class="mnavitem"   onclick="go('changes')"><span class="mic">🔄</span><span>변경</span></button>
+    <button class="mnavitem"   onclick="go('logs')"><span class="mic">📋</span><span>로그</span></button>
+    <button class="mnavitem"   onclick="go('roadmap')"><span class="mic">🗺️</span><span>로드맵</span></button>
   </div>
 </nav>
 
@@ -493,7 +688,100 @@ function go(name){
   document.querySelectorAll('[onclick="go(\''+name+'\')"]').forEach(e=>e.classList.add('on'));
   if(name==='port' && !CHS.sector) renderSector();
   if(name==='perf' && !CHS.perf)  renderPerfChart('ch-perf','perf');
-  if(name==='risk' && !CHS.score) renderScore();
+  if(name==='risk'    && !CHS.score) renderScore();
+  if(name==='changes' && !_changesLoaded) loadChanges();
+  if(name==='logs'    && !_logsLoaded)    loadLogs();
+}
+
+let _logsLoaded=false,_changesLoaded=false,_logFilter='all',_allLogLines=[];
+
+/* ── CHANGES TAB ── */
+async function loadChanges(){
+  try{
+    const r=await fetch('/api/changes?token='+TK);
+    if(!r.ok)throw new Error();
+    const data=await r.json();
+    renderChanges(data);
+    _changesLoaded=true;
+  }catch{
+    document.getElementById('chg-new').innerHTML='<p style="color:#ef4444">데이터 로드 실패</p>';
+  }
+}
+
+function renderChanges(data){
+  const ch=data.changes||{};
+  const date=ch.date||data.current&&data.current.month||'—';
+  document.getElementById('chg-sub').textContent='리밸런싱 날짜: '+date;
+  const nw=ch.new||[],ex=ch.exited||[],up=ch.increased||[],dn=ch.decreased||[],kp=ch.unchanged||[];
+  document.getElementById('chg-kpis').innerHTML=[
+    {l:'신규 편입',v:nw.length+'종목',c:'pos'},
+    {l:'편출',v:ex.length+'종목',c:'neg'},
+    {l:'비중 확대',v:up.length+'종목',c:'neu'},
+    {l:'비중 축소',v:dn.length+'종목',c:'neg'},
+    {l:'유지',v:kp.length+'종목',c:''},
+  ].map(k=>'<div class="card"><div class="ctitle">'+k.l+'</div><div class="kval '+k.c+'" style="font-size:22px">'+k.v+'</div></div>').join('');
+  document.getElementById('cnt-new').textContent=nw.length+'종목';
+  document.getElementById('cnt-exit').textContent=ex.length+'종목';
+  document.getElementById('cnt-up').textContent=up.length+'종목';
+  document.getElementById('cnt-dn').textContent=dn.length+'종목';
+  document.getElementById('cnt-keep').textContent=kp.length+'종목';
+  const chCard=(h,cls,tag,extra)=>{
+    const diff=extra||'';
+    return '<div class="ch-card '+cls+'">'+
+      '<div class="ch-ticker">'+h.ticker+'</div>'+
+      '<div class="ch-name">'+(h.name||'')+'</div>'+
+      '<div class="ch-row"><span class="ch-label">비중</span><span class="ch-val">'+((h.weight||0).toFixed(1))+'%'+diff+'</span></div>'+
+      '<div class="ch-row"><span class="ch-label">스코어</span><span class="ch-val">'+(h.score||'—')+'</span></div>'+
+      '<div class="ch-row"><span class="ch-label">섹터</span><span class="ch-val" style="font-size:10px">'+((h.sector||'—').replace('Communication Services','Comm.'))+'</span></div>'+
+      '<span class="badge" style="margin-top:6px;display:inline-block;'+tag+'">'+{ch_new:'신규',ch_exit:'편출',ch_up:'확대',ch_dn:'축소',ch_keep:'유지'}[cls.replace('-','_')]+'</span>'+
+      '</div>';
+  };
+  const noItem='<p style="color:var(--mu);font-size:13px">없음</p>';
+  document.getElementById('chg-new').innerHTML=nw.map(h=>chCard(h,'ch-new','background:rgba(34,197,94,.12);color:#22c55e','')).join('')||noItem;
+  document.getElementById('chg-exit').innerHTML=ex.map(h=>chCard(h,'ch-exit','background:rgba(239,68,68,.12);color:#ef4444','')).join('')||noItem;
+  document.getElementById('chg-up').innerHTML=up.map(h=>chCard(h,'ch-up','background:rgba(99,102,241,.12);color:#6366f1',h.prev_weight!=null?' (+'+(h.weight-h.prev_weight).toFixed(1)+'%p)':'')).join('')||noItem;
+  document.getElementById('chg-dn').innerHTML=dn.map(h=>chCard(h,'ch-dn','background:rgba(245,158,11,.12);color:#f59e0b',h.prev_weight!=null?' (-'+Math.abs(h.weight-h.prev_weight).toFixed(1)+'%p)':'')).join('')||noItem;
+  document.getElementById('chg-keep').innerHTML=kp.map(h=>chCard(h,'ch-keep','background:rgba(0,198,169,.12);color:#00C6A9','')).join('')||noItem;
+}
+
+/* ── LOGS TAB ── */
+async function loadLogs(){
+  document.getElementById('log-box').textContent='로딩 중…';
+  try{
+    const r=await fetch('/api/logs?token='+TK+'&n=300');
+    if(!r.ok)throw new Error();
+    const data=await r.json();
+    _allLogLines=data.lines||[];
+    document.getElementById('log-sub').textContent='전체 '+data.total+'줄 중 최근 '+_allLogLines.length+'줄';
+    renderLogLines(_logFilter);
+    _logsLoaded=true;
+  }catch{
+    document.getElementById('log-box').textContent='로그 로드 실패';
+  }
+}
+
+function filterLog(f){
+  _logFilter=f;
+  renderLogLines(f);
+}
+
+function renderLogLines(filter){
+  const box=document.getElementById('log-box');
+  if(!box)return;
+  const lines=_allLogLines.filter(l=>{
+    if(filter==='all')return true;
+    if(filter==='error')return l.includes('[ERROR]')||l.includes('[WARNING]');
+    if(filter==='info')return l.includes('[INFO]');
+    return true;
+  });
+  box.innerHTML=[...lines].reverse().map(l=>{
+    let cls='log-info';
+    if(l.includes('[ERROR]'))cls='log-err';
+    else if(l.includes('[WARNING]'))cls='log-warn';
+    else if(l.includes('완료')||l.includes('저장'))cls='log-ok';
+    const esc=l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return'<div class="log-line '+cls+'">'+esc+'</div>';
+  }).join('');
 }
 
 async function load(){
