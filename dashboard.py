@@ -26,8 +26,9 @@ def api_data(token: str = ""):
 
 @app.get("/api/benchmark")
 def api_benchmark(token: str = "", start: str = ""):
-    """SPY/QQQ 일별 누적 수익률 (포트폴리오 시작일 기준).
-    start 파라미터 없으면 portfolio_state_us.json의 month 필드에서 자동 결정.
+    """SPY/QQQ 일별 누적 수익률 — 포트폴리오 첫 기록일 기준으로 계산.
+    포트폴리오 수익률(진입가 기준 누적)과 동일 기준점을 맞추기 위해
+    performance_history.json의 가장 오래된 레코드 날짜를 시작일로 사용.
     반환: {spy:[{date,ret},...], qqq:[{date,ret},...], start_date, updated}
     """
     if token != TOKEN: raise HTTPException(401)
@@ -35,14 +36,16 @@ def api_benchmark(token: str = "", start: str = ""):
         import yfinance as yf
         import pandas as pd
 
-        # 시작일 결정
+        # 시작일 결정 — 성과 이력의 첫 날짜 (포트폴리오 누적 기준점과 일치)
         if not start:
-            port = _load("portfolio_state_us.json") or {}
-            month = port.get("month", "")
-            if month:
-                start = f"{month}-01"
+            perf = _load("performance_history.json") or {}
+            records = perf.get("records", [])
+            if records:
+                start = records[0]["date"]          # 첫 리밸런싱일 (예: 2026-04-01)
             else:
-                start = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+                port = _load("portfolio_state_us.json") or {}
+                month = port.get("month", "")
+                start = f"{month}-01" if month else (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
 
         end = datetime.now().strftime("%Y-%m-%d")
         raw = yf.download(
@@ -811,10 +814,10 @@ function render(){
   const checks=recs.filter(r=>r.type==='performance_check'&&r.portfolio_ret_pct!=null);
   const lat=checks.slice(-1)[0];
   const pr=lat?lat.portfolio_ret_pct:0;
-  // BM 우선 — 저장 레코드 spy/qqq가 null일 때 실시간 데이터 사용
-  const sr=(BM?.spy?.slice(-1)[0]?.ret)??( lat?.spy_ret_pct??null);
-  const qr=(BM?.qqq?.slice(-1)[0]?.ret)??( lat?.qqq_ret_pct??null);
-  const al=sr!=null?pr-sr:(lat?.alpha_vs_spy??null);
+  // BM은 첫 리밸런싱일부터의 누적 수익률 — 포트폴리오 누적과 동일 기준
+  const sr=BM?.spy?.length>0 ? BM.spy.slice(-1)[0].ret : null;
+  const qr=BM?.qqq?.length>0 ? BM.qqq.slice(-1)[0].ret : null;
+  const al=sr!=null?Math.round((pr-sr)*100)/100:null;
 
   // nav labels
   const mon=p.month||'';
@@ -883,20 +886,22 @@ function renderPerfChart(canvasId,key){
     RANGE[key]||'ALL'
   );
 
-  // BM 데이터를 날짜→수익률 맵으로 변환
+  // BM은 첫 리밸런싱일부터 연속 누적 수익률 — 기간 필터 적용
   const range=RANGE[key]||'ALL';
   const days={'1M':30,'3M':90,'6M':180}[range];
   const cutDate=days?new Date(Date.now()-days*864e5).toISOString().slice(0,10):'0000-00-00';
   const spyBM=Object.fromEntries((BM?.spy||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
   const qqqBM=Object.fromEntries((BM?.qqq||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
-
-  // 포트폴리오 레코드가 없어도 BM 데이터만 있으면 차트 그릴 수 있게
   const bmDates=Object.keys(spyBM).sort();
-  if(!perfRecs.length && !bmDates.length){
+
+  // 날짜 통합: 포트폴리오 레코드 + BM 날짜 + 리밸런싱 마커
+  const pfDates=perfRecs.map(r=>r.date);
+  const allDates=[...new Set([...pfDates,...bmDates])].sort();
+
+  if(!allDates.length){
     if(CHS[key])CHS[key].destroy();delete CHS[key];
-    // 빈 상태 표시
     const parent=ctx.parentElement;
-    if(parent && !parent.querySelector('.no-data')){
+    if(parent&&!parent.querySelector('.no-data')){
       const msg=document.createElement('p');
       msg.className='no-data';
       msg.style.cssText='color:#64748b;font-size:13px;text-align:center;padding:24px';
@@ -906,12 +911,8 @@ function renderPerfChart(canvasId,key){
     return;
   }
 
-  // 날짜 통합: 성과 레코드 + BM 날짜 + 리밸런싱 날짜
-  const pfDates=perfRecs.map(r=>r.date);
-  const firstDate=pfDates[0]||bmDates[0]||'';
-  const lastDate=pfDates[pfDates.length-1]||bmDates[bmDates.length-1]||'';
-  const rebalIn=rebalDates.filter(d=>d>firstDate&&d<lastDate);
-  const allDates=[...new Set([...pfDates,...bmDates,...rebalIn])].sort();
+  const firstDate=allDates[0], lastDate=allDates[allDates.length-1];
+  const rebalIn=rebalDates.filter(d=>d>firstDate&&d<=lastDate);
   const pm=Object.fromEntries(perfRecs.map(r=>[r.date,r]));
 
   const annotations={};
@@ -934,12 +935,12 @@ function renderPerfChart(canvasId,key){
        borderColor:'#00C6A9',backgroundColor:'rgba(0,198,169,.1)',
        borderWidth:2.5,pointRadius:big?0:5,fill:true,tension:.3,spanGaps:true},
       {label:'SPY',
-       // BM 실시간 우선, 없으면 저장된 값 fallback
-       data:allDates.map(d=>spyBM[d]??pm[d]?.spy_ret_pct??null),
+       // BM: 첫 리밸런싱일부터 연속 누적 수익률 (포트폴리오와 동일 기준점)
+       data:allDates.map(d=>spyBM[d]??null),
        borderColor:'#6366f1',backgroundColor:'transparent',
        borderWidth:1.5,borderDash:[6,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
       {label:'QQQ',
-       data:allDates.map(d=>qqqBM[d]??pm[d]?.qqq_ret_pct??null),
+       data:allDates.map(d=>qqqBM[d]??null),
        borderColor:'#f59e0b',backgroundColor:'transparent',
        borderWidth:1.5,borderDash:[3,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
     ]},
@@ -1053,20 +1054,20 @@ function renderPerfKPIs(checks){
   const el=document.getElementById('perf-kpis');if(!el)return;
   const lat=checks.slice(-1)[0];
   const latPr=lat?.portfolio_ret_pct??null;
-  // BM 실시간 데이터 우선 사용
-  const latSpy=(BM?.spy?.slice(-1)[0]?.ret)??(lat?.spy_ret_pct??null);
-  const latQqq=(BM?.qqq?.slice(-1)[0]?.ret)??(lat?.qqq_ret_pct??null);
-  const latAlpha=latSpy!=null&&latPr!=null?latPr-latSpy:(lat?.alpha_vs_spy??null);
-  const alphas=checks.filter(r=>r.alpha_vs_spy!=null).map(r=>r.alpha_vs_spy);
-  const avgA=alphas.length?alphas.reduce((a,b)=>a+b,0)/alphas.length:null;
+  // BM: 첫 리밸런싱일부터 누적 수익률 (포트폴리오와 동일 기준점)
+  const latSpy=BM?.spy?.length>0 ? BM.spy.slice(-1)[0].ret : null;
+  const latQqq=BM?.qqq?.length>0 ? BM.qqq.slice(-1)[0].ret : null;
+  const latAlpha=latSpy!=null&&latPr!=null ? Math.round((latPr-latSpy)*100)/100 : null;
+  const latAlphaQqq=latQqq!=null&&latPr!=null ? Math.round((latPr-latQqq)*100)/100 : null;
+  // 평균 Alpha: BM 기준 알파 (저장된 월별 알파의 평균은 기준이 달라 의미 없음)
   const ks=[
-    {l:'최근 수익률',v:fp(latPr),c:fc(latPr||0)},
+    {l:'포트폴리오 누적',v:fp(latPr),c:fc(latPr||0),s:'첫 리밸런싱 기준'},
     {l:'SPY 대비 Alpha',v:latAlpha!=null?fp(latAlpha)+'p':'—',c:fc(latAlpha||0),
-     s:latSpy!=null?'SPY '+fp(latSpy):''},
-    {l:'QQQ 대비 Alpha',v:latQqq!=null&&latPr!=null?fp(latPr-latQqq)+'p':'—',
-     c:fc(latQqq!=null&&latPr!=null?latPr-latQqq:0),
-     s:latQqq!=null?'QQQ '+fp(latQqq):''},
-    {l:'평균 Alpha vs SPY',v:avgA!=null?fp(avgA)+'p':'—',c:fc(avgA||0)},
+     s:latSpy!=null?'SPY '+fp(latSpy):'BM 로딩 중'},
+    {l:'QQQ 대비 Alpha',v:latAlphaQqq!=null?fp(latAlphaQqq)+'p':'—',
+     c:fc(latAlphaQqq||0),
+     s:latQqq!=null?'QQQ '+fp(latQqq):'BM 로딩 중'},
+    {l:'포트폴리오 vs SPY',v:latSpy!=null&&latPr!=null?fp(latPr)+' vs '+fp(latSpy,false):'—',c:'neu',s:'동일 기준점 비교'},
   ];
   el.innerHTML=ks.map(k=>
     `<div class="card"><div class="ctitle">${k.l}</div>
