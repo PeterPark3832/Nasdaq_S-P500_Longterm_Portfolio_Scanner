@@ -148,11 +148,10 @@ def test_sector_cap_unknown_exempt():
 
 # ── analyze_ticker ──────────────────────────────────────────────────
 def _make_price_df(n_days=300):
-    import numpy as np
-    from datetime import date, timedelta
+    from datetime import date
     dates  = pd.date_range(end=date.today(), periods=n_days, freq="B")
-    prices = 100 * (1 + pd.Series(np.random.randn(n_days) * 0.01)).cumprod()
-    prices = prices * 1.5  # ensure above MA200
+    # 선형 상승 — last price > MA200 보장 (랜덤 시드 의존 제거)
+    prices = pd.Series([100.0 + i * 0.5 for i in range(n_days)])
     df = pd.DataFrame({
         "Close": prices.values,
         "High":  (prices * 1.02).values,
