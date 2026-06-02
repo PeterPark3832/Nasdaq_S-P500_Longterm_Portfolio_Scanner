@@ -436,9 +436,9 @@ tr:last-child td{border-bottom:none}
         <div class="ctitle">성과 추이 — 포트폴리오 vs SPY vs QQQ</div>
         <div class="cf">
           <span class="cf-lbl">기간</span>
-          <button class="cfbtn" onclick="setRange('1M','home')">1M</button>
-          <button class="cfbtn" onclick="setRange('3M','home')">3M</button>
-          <button class="cfbtn" onclick="setRange('6M','home')">6M</button>
+          <button class="cfbtn" id="cfbtn-home-1M" onclick="setRange('1M','home')">1M</button>
+          <button class="cfbtn" id="cfbtn-home-3M" onclick="setRange('3M','home')">3M</button>
+          <button class="cfbtn" id="cfbtn-home-6M" onclick="setRange('6M','home')">6M</button>
           <button class="cfbtn on" id="cfbtn-home-ALL" onclick="setRange('ALL','home')">ALL</button>
         </div>
         <canvas id="ch-home" height="220"></canvas>
@@ -480,9 +480,9 @@ tr:last-child td{border-bottom:none}
       <div class="ctitle">누적 수익률 추이</div>
       <div class="cf">
         <span class="cf-lbl">기간</span>
-        <button class="cfbtn" onclick="setRange('1M','perf')">1M</button>
-        <button class="cfbtn" onclick="setRange('3M','perf')">3M</button>
-        <button class="cfbtn" onclick="setRange('6M','perf')">6M</button>
+        <button class="cfbtn" id="cfbtn-perf-1M" onclick="setRange('1M','perf')">1M</button>
+        <button class="cfbtn" id="cfbtn-perf-3M" onclick="setRange('3M','perf')">3M</button>
+        <button class="cfbtn" id="cfbtn-perf-6M" onclick="setRange('6M','perf')">6M</button>
         <button class="cfbtn on" id="cfbtn-perf-ALL" onclick="setRange('ALL','perf')">ALL</button>
       </div>
       <canvas id="ch-perf" height="200"></canvas>
@@ -874,87 +874,151 @@ function setRange(range,key){
   renderPerfChart('ch-'+key,key);
 }
 
-/* ── LINE CHART (chart + rebalancing markers) ── */
+/* ── LINE CHART ── */
 function renderPerfChart(canvasId,key){
   if(!D)return;
   const ctx=document.getElementById(canvasId);
   if(!ctx)return;
+
+  const range=RANGE[key]||'ALL';
   const allRecs=D.performance.records||[];
   const rebalDates=allRecs.filter(r=>r.type==='rebalancing').map(r=>r.date);
+
+  // 기간 필터
+  const dayMap={'1M':30,'3M':90,'6M':180};
+  const nDays=dayMap[range];
+  const cutDate=nDays?new Date(Date.now()-nDays*864e5).toISOString().slice(0,10):'0000-00-00';
+
   const perfRecs=filterByRange(
     allRecs.filter(r=>r.type!=='rebalancing'&&r.portfolio_ret_pct!=null),
-    RANGE[key]||'ALL'
+    range
   );
 
-  // BM은 첫 리밸런싱일부터 연속 누적 수익률 — 기간 필터 적용
-  const range=RANGE[key]||'ALL';
-  const days={'1M':30,'3M':90,'6M':180}[range];
-  const cutDate=days?new Date(Date.now()-days*864e5).toISOString().slice(0,10):'0000-00-00';
-  const spyBM=Object.fromEntries((BM?.spy||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
-  const qqqBM=Object.fromEntries((BM?.qqq||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
-  const bmDates=Object.keys(spyBM).sort();
+  // BM 필터 (기간 내)
+  const spyArr=(BM?.spy||[]).filter(p=>p.date>=cutDate);
+  const qqqArr=(BM?.qqq||[]).filter(p=>p.date>=cutDate);
+  const spyMap=Object.fromEntries(spyArr.map(p=>[p.date,p.ret]));
+  const qqqMap=Object.fromEntries(qqqArr.map(p=>[p.date,p.ret]));
 
-  // 날짜 통합: 포트폴리오 레코드 + BM 날짜 + 리밸런싱 마커
   const pfDates=perfRecs.map(r=>r.date);
+  const bmDates=Object.keys(spyMap).sort();
   const allDates=[...new Set([...pfDates,...bmDates])].sort();
 
   if(!allDates.length){
-    if(CHS[key])CHS[key].destroy();delete CHS[key];
-    const parent=ctx.parentElement;
-    if(parent&&!parent.querySelector('.no-data')){
-      const msg=document.createElement('p');
-      msg.className='no-data';
-      msg.style.cssText='color:#64748b;font-size:13px;text-align:center;padding:24px';
-      msg.textContent='성과 데이터 없음 (봇 가동 후 07:00 KST에 자동 수집됩니다)';
-      parent.appendChild(msg);
-    }
+    if(CHS[key])CHS[key].destroy(); delete CHS[key];
+    ctx.parentElement.innerHTML+='<p style="color:#64748b;font-size:13px;text-align:center;padding:24px">데이터 없음</p>';
     return;
   }
 
-  const firstDate=allDates[0], lastDate=allDates[allDates.length-1];
-  const rebalIn=rebalDates.filter(d=>d>firstDate&&d<=lastDate);
   const pm=Object.fromEntries(perfRecs.map(r=>[r.date,r]));
+  const rawPort=allDates.map(d=>pm[d]?.portfolio_ret_pct??null);
+  const rawSpy =allDates.map(d=>spyMap[d]??null);
+  const rawQqq =allDates.map(d=>qqqMap[d]??null);
 
-  const annotations={};
+  // 1M/3M/6M: 기간 시작을 0%로 리베이스 (Bloomberg/Yahoo Finance 방식)
+  // ALL: 4월 1일 기준 누적 그대로 유지
+  function rebase(arr){
+    const base=arr.find(v=>v!=null);
+    if(base==null)return arr;
+    return arr.map(v=>v==null?null:parseFloat((v-base).toFixed(2)));
+  }
+  const portData=range==='ALL'?rawPort:rebase(rawPort);
+  const spyData =range==='ALL'?rawSpy :rebase(rawSpy);
+  const qqqData =range==='ALL'?rawQqq :rebase(rawQqq);
+
+  // 리밸런싱 마커
+  const firstDate=allDates[0], lastDate=allDates[allDates.length-1];
+  const rebalIn=rebalDates.filter(d=>d>=firstDate&&d<=lastDate);
+  const annotations={
+    zeroline:{type:'line',yMin:0,yMax:0,
+      borderColor:'rgba(255,255,255,.12)',borderWidth:1}
+  };
   rebalIn.forEach((d,i)=>{
     annotations['r'+i]={type:'line',xMin:d,xMax:d,
-      borderColor:'rgba(99,102,241,.55)',borderWidth:1.5,borderDash:[4,4],
+      borderColor:'rgba(99,102,241,.4)',borderWidth:1,borderDash:[4,4],
       label:{display:true,content:'리밸',position:'start',
         font:{size:9,weight:'bold'},color:'#818cf8',
-        backgroundColor:'rgba(99,102,241,.12)',
-        padding:{x:4,y:2},yAdjust:-4}};
+        backgroundColor:'rgba(99,102,241,.1)',padding:{x:3,y:2},yAdjust:-2}};
   });
 
   if(CHS[key])CHS[key].destroy();
   const big=allDates.length>60;
+
+  // 그라디언트 fill (포트폴리오)
+  function gradientFill(context){
+    const {ctx:c,chartArea}=context.chart;
+    if(!chartArea)return'rgba(0,198,169,.08)';
+    const g=c.createLinearGradient(0,chartArea.top,0,chartArea.bottom);
+    g.addColorStop(0,'rgba(0,198,169,.22)');
+    g.addColorStop(1,'rgba(0,198,169,.01)');
+    return g;
+  }
+
   CHS[key]=new Chart(ctx,{
     type:'line',
     data:{labels:allDates,datasets:[
-      {label:'포트폴리오',
-       data:allDates.map(d=>pm[d]?.portfolio_ret_pct??null),
-       borderColor:'#00C6A9',backgroundColor:'rgba(0,198,169,.1)',
-       borderWidth:2.5,pointRadius:big?0:5,fill:true,tension:.3,spanGaps:true},
-      {label:'SPY',
-       // BM: 첫 리밸런싱일부터 연속 누적 수익률 (포트폴리오와 동일 기준점)
-       data:allDates.map(d=>spyBM[d]??null),
-       borderColor:'#6366f1',backgroundColor:'transparent',
-       borderWidth:1.5,borderDash:[6,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
-      {label:'QQQ',
-       data:allDates.map(d=>qqqBM[d]??null),
+      {label:'포트폴리오',data:portData,order:1,
+       borderColor:'#00C6A9',backgroundColor:gradientFill,
+       borderWidth:2.5,pointRadius:big?0:4,pointHoverRadius:6,
+       fill:true,tension:.35,spanGaps:true},
+      {label:'SPY',data:spyData,order:2,
+       borderColor:'#818cf8',backgroundColor:'transparent',
+       borderWidth:1.5,borderDash:[5,3],
+       pointRadius:0,pointHoverRadius:5,
+       fill:false,tension:.35,spanGaps:true},
+      {label:'QQQ',data:qqqData,order:3,
        borderColor:'#f59e0b',backgroundColor:'transparent',
-       borderWidth:1.5,borderDash:[3,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
+       borderWidth:1.5,borderDash:[3,3],
+       pointRadius:0,pointHoverRadius:5,
+       fill:false,tension:.35,spanGaps:true},
     ]},
-    options:{responsive:true,
+    options:{
+      responsive:true,
+      interaction:{mode:'index',intersect:false},
       plugins:{
-        legend:{labels:{color:'#94a3b8',font:{size:12}}},
-        tooltip:{mode:'index',intersect:false,
-          filter:i=>i.raw!=null,
-          callbacks:{label:c=>` ${c.dataset.label}: ${c.raw!=null?c.raw.toFixed(2)+'%':'—'}`}},
-        annotation:{annotations}},
+        legend:{
+          position:'top',align:'end',
+          labels:{color:'#94a3b8',font:{size:12},
+            usePointStyle:true,pointStyleWidth:10,boxHeight:8,padding:16}
+        },
+        tooltip:{
+          backgroundColor:'rgba(13,17,26,.95)',
+          borderColor:'rgba(30,40,64,.8)',borderWidth:1,
+          padding:12,titleColor:'#e2e8f0',bodyColor:'#94a3b8',
+          titleFont:{size:12},bodyFont:{size:12},
+          callbacks:{
+            label:c=>{
+              if(c.raw==null)return null;
+              const s=c.raw>0?'+':'';
+              return` ${c.dataset.label}: ${s}${c.raw.toFixed(2)}%`;
+            },
+            afterBody:items=>{
+              const port=items.find(i=>i.dataset.label==='포트폴리오');
+              const spy =items.find(i=>i.dataset.label==='SPY');
+              if(port?.raw!=null&&spy?.raw!=null){
+                const a=(port.raw-spy.raw).toFixed(2);
+                return[`─────────`,` Alpha vs SPY: ${a>0?'+':''}${a}%p`];
+              }
+              return[];
+            }
+          }
+        },
+        annotation:{annotations}
+      },
       scales:{
-        x:{ticks:{color:'#64748b',maxTicksLimit:8},grid:{color:'#1E2840'}},
-        y:{ticks:{color:'#64748b',callback:v=>v+'%'},grid:{color:'#1E2840'}}
-      }}
+        x:{
+          ticks:{color:'#64748b',maxTicksLimit:8,font:{size:11}},
+          grid:{color:'rgba(30,40,64,.7)'}
+        },
+        y:{
+          ticks:{
+            color:'#64748b',font:{size:11},
+            callback:v=>(v>0?'+':'')+v+'%'
+          },
+          grid:{color:'rgba(30,40,64,.7)'}
+        }
+      }
+    }
   });
 }
 
