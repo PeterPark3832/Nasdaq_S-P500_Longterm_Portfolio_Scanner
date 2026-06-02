@@ -144,6 +144,9 @@ MAIN = r"""<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <title>US Portfolio Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -194,14 +197,14 @@ body{background:var(--bg);color:var(--tx);
 .tb-clock{font-size:12px;color:var(--mu)}
 
 /* ══ MOBILE BOTTOM NAV ══ */
-.mnav{display:none;position:fixed;bottom:0;left:0;right:0;height:62px;
-  background:var(--s1);border-top:1px solid var(--bd);z-index:200}
-.mnavitems{display:flex;height:100%}
-.mnavitem{flex:1;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:3px;border:none;background:transparent;
-  color:var(--mu);font-size:10px;cursor:pointer;transition:color .15s}
+.mnav{display:none;position:fixed;bottom:0;left:0;right:0;height:58px;
+  background:var(--s1);border-top:1px solid var(--bd);z-index:200;overflow-x:auto}
+.mnavitems{display:flex;height:100%;min-width:max-content}
+.mnavitem{min-width:52px;flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:2px;border:none;background:transparent;padding:0 4px;
+  color:var(--mu);font-size:9px;cursor:pointer;transition:color .15s;white-space:nowrap}
 .mnavitem.on{color:var(--pr)}
-.mnavitem .mic{font-size:20px;line-height:1}
+.mnavitem .mic{font-size:18px;line-height:1}
 
 /* ══ MAIN CONTENT ══ */
 .main{margin-left:var(--sb);padding:28px;min-height:100vh}
@@ -327,19 +330,28 @@ tr:last-child td{border-bottom:none}
   .sidebar{display:none}
   .topbar{display:flex}
   .mnav{display:block}
-  .main{margin-left:0;padding:62px 14px 74px}
+  .main{margin-left:0;padding:62px 14px 70px}
   .kpis{grid-template-columns:repeat(2,1fr)}
   .kpis .kpi:nth-child(5){grid-column:1/-1}
-  .kval{font-size:22px}
+  .kval{font-size:20px}
   .g3{grid-template-columns:1fr}
-  th,td{padding:8px 10px}
-  table{font-size:12px}
+  th,td{padding:7px 8px}
+  table{font-size:11px}
   .desk-tbl{display:none}
   .mcards{display:block}
   .home-list{max-height:none;overflow-y:visible}
+  .ptitle{font-size:17px}
+  .card,.cc{padding:14px}
+  .cf{flex-wrap:wrap;gap:4px}
+  .cfbtn{padding:4px 10px;font-size:11px}
+  .ch-grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
 }
 @media(max-width:420px){
   .kpis{grid-template-columns:1fr 1fr}
+  .kval{font-size:18px}
+  .mnav{height:54px}
+  .mnavitem{min-width:46px;font-size:8px}
+  .mnavitem .mic{font-size:16px}
 }
 
 /* ══ LOG VIEWER ══ */
@@ -541,7 +553,7 @@ tr:last-child td{border-bottom:none}
       <div class="ptitle">포트폴리오 변경 내역</div>
       <div class="psub" id="chg-sub">최근 리밸런싱 기준</div>
     </div>
-    <div class="g3" id="chg-kpis"></div>
+    <div class="kpis" id="chg-kpis" style="grid-template-columns:repeat(5,1fr);margin-bottom:20px"></div>
     <div id="chg-new-wrap" class="mb16">
       <div class="chg-hdr"><span class="chg-title">🟢 신규 편입</span><span class="chg-cnt" id="cnt-new">0종목</span></div>
       <div class="ch-grid" id="chg-new"></div>
@@ -886,7 +898,8 @@ function setRange(range,key){
     };
     sub.textContent=labels[range]||'';
   }
-  delete CHS[key];
+  // 반드시 destroy() 후 delete — delete만 하면 canvas에 구 차트 잔존
+  if(CHS[key]){ CHS[key].destroy(); delete CHS[key]; }
   renderPerfChart('ch-'+key,key);
 }
 
@@ -977,7 +990,10 @@ function renderPerfChart(canvasId,key){
         backgroundColor:'rgba(99,102,241,.12)',padding:{x:3,y:2},yAdjust:-2}};
   });
 
-  if(CHS[key])CHS[key].destroy();
+  // 혹시 남아있는 구 차트 강제 제거 (안전망)
+  if(CHS[key]){ CHS[key].destroy(); delete CHS[key]; }
+  const existing=Chart.getChart(ctx);
+  if(existing) existing.destroy();
   const big=allDates.length>60;
 
   // 그라디언트 fill (포트폴리오)
