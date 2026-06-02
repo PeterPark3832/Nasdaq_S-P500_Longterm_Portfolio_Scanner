@@ -135,7 +135,10 @@ code{color:#00C6A9;background:rgba(0,198,169,.12);padding:2px 8px;border-radius:
 <div class="t">접근 제한</div>
 <p style="color:#64748b;font-size:14px;margin-top:8px">URL에 <code>?token=scanner2024</code> 추가</p>
 </div></body></html>""")
-    return HTMLResponse(MAIN.replace("__TOKEN__", token))
+    return HTMLResponse(
+        MAIN.replace("__TOKEN__", token),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
 
 MAIN = r"""<!DOCTYPE html>
 <html lang="ko">
@@ -434,6 +437,7 @@ tr:last-child td{border-bottom:none}
     <div class="home-grid">
       <div class="cc">
         <div class="ctitle">성과 추이 — 포트폴리오 vs SPY vs QQQ</div>
+        <div id="chart-home-sub" style="font-size:11px;color:#64748b;margin:-8px 0 8px"></div>
         <div class="cf">
           <span class="cf-lbl">기간</span>
           <button class="cfbtn" id="cfbtn-home-1M" onclick="setRange('1M','home')">1M</button>
@@ -478,6 +482,7 @@ tr:last-child td{border-bottom:none}
     <div class="phdr"><div class="ptitle">성과 분석</div></div>
     <div class="cc mb16">
       <div class="ctitle">누적 수익률 추이</div>
+      <div id="chart-perf-sub" style="font-size:11px;color:#64748b;margin:-8px 0 8px"></div>
       <div class="cf">
         <span class="cf-lbl">기간</span>
         <button class="cfbtn" id="cfbtn-perf-1M" onclick="setRange('1M','perf')">1M</button>
@@ -870,6 +875,17 @@ function setRange(range,key){
     const b=document.getElementById(`cfbtn-${key}-${r}`);
     if(b) b.classList.toggle('on',r===range);
   });
+  // 서브타이틀 업데이트
+  const sub=document.getElementById(`chart-${key}-sub`);
+  if(sub){
+    const labels={
+      'ALL':'ALL — 포트폴리오: 진입가 기준 / SPY·QQQ: 동기간 비교 (리밸↺ 기준 리셋)',
+      '1M':'최근 1개월 — 기간 시작 기준 0% 리베이스',
+      '3M':'최근 3개월 — 기간 시작 기준 0% 리베이스',
+      '6M':'최근 6개월 — 기간 시작 기준 0% 리베이스',
+    };
+    sub.textContent=labels[range]||'';
+  }
   delete CHS[key];
   renderPerfChart('ch-'+key,key);
 }
@@ -883,8 +899,8 @@ function renderPerfChart(canvasId,key){
   const range=RANGE[key]||'ALL';
   const allRecs=D.performance.records||[];
   const rebalDates=allRecs.filter(r=>r.type==='rebalancing').map(r=>r.date);
+  const lastRebal=rebalDates.slice(-1)[0]||'0000-00-00';
 
-  // 기간 필터
   const dayMap={'1M':30,'3M':90,'6M':180};
   const nDays=dayMap[range];
   const cutDate=nDays?new Date(Date.now()-nDays*864e5).toISOString().slice(0,10):'0000-00-00';
@@ -893,52 +909,72 @@ function renderPerfChart(canvasId,key){
     allRecs.filter(r=>r.type!=='rebalancing'&&r.portfolio_ret_pct!=null),
     range
   );
-
-  // BM 필터 (기간 내)
-  const spyArr=(BM?.spy||[]).filter(p=>p.date>=cutDate);
-  const qqqArr=(BM?.qqq||[]).filter(p=>p.date>=cutDate);
-  const spyMap=Object.fromEntries(spyArr.map(p=>[p.date,p.ret]));
-  const qqqMap=Object.fromEntries(qqqArr.map(p=>[p.date,p.ret]));
-
-  const pfDates=perfRecs.map(r=>r.date);
-  const bmDates=Object.keys(spyMap).sort();
-  const allDates=[...new Set([...pfDates,...bmDates])].sort();
-
-  if(!allDates.length){
-    if(CHS[key])CHS[key].destroy(); delete CHS[key];
-    ctx.parentElement.innerHTML+='<p style="color:#64748b;font-size:13px;text-align:center;padding:24px">데이터 없음</p>';
-    return;
-  }
-
   const pm=Object.fromEntries(perfRecs.map(r=>[r.date,r]));
-  const rawPort=allDates.map(d=>pm[d]?.portfolio_ret_pct??null);
-  const rawSpy =allDates.map(d=>spyMap[d]??null);
-  const rawQqq =allDates.map(d=>qqqMap[d]??null);
 
-  // 1M/3M/6M: 기간 시작을 0%로 리베이스 (Bloomberg/Yahoo Finance 방식)
-  // ALL: 4월 1일 기준 누적 그대로 유지
   function rebase(arr){
     const base=arr.find(v=>v!=null);
     if(base==null)return arr;
     return arr.map(v=>v==null?null:parseFloat((v-base).toFixed(2)));
   }
-  const portData=range==='ALL'?rawPort:rebase(rawPort);
-  const spyData =range==='ALL'?rawSpy :rebase(rawSpy);
-  const qqqData =range==='ALL'?rawQqq :rebase(rawQqq);
+
+  let allDates, portData, spyData, qqqData;
+
+  if(range==='ALL'){
+    // ── ALL 뷰: 저장된 spy_ret_pct 사용 (포트폴리오와 동일 월별 기준)
+    // 포트폴리오 점검 날짜만 X축 사용 (BM 섞으면 기준점 혼재)
+    // 현재 월(마지막 리밸 이후)은 BM으로 보완
+    const bmCurr=Object.fromEntries(
+      (BM?.spy||[]).filter(p=>p.date>=lastRebal).map(p=>[p.date,p.ret])
+    );
+    const qqqCurr=Object.fromEntries(
+      (BM?.qqq||[]).filter(p=>p.date>=lastRebal).map(p=>[p.date,p.ret])
+    );
+    // BM 현재월 리베이스 (마지막 리밸 = 0%)
+    function rebaseCurr(map){
+      const sorted=Object.keys(map).sort();
+      if(!sorted.length)return{};
+      const base=map[sorted[0]];
+      return Object.fromEntries(sorted.map(d=>[d,parseFloat((map[d]-base).toFixed(2))]));
+    }
+    const spyCurr=rebaseCurr(bmCurr);
+    const qqqCurr2=rebaseCurr(qqqCurr);
+
+    const pfDates=perfRecs.map(r=>r.date);
+    const currBmDates=Object.keys(spyCurr).filter(d=>!pfDates.includes(d)).sort();
+    allDates=[...new Set([...pfDates,...currBmDates])].sort();
+
+    portData=allDates.map(d=>pm[d]?.portfolio_ret_pct??null);
+    spyData =allDates.map(d=>pm[d]?.spy_ret_pct??spyCurr[d]??null);
+    qqqData =allDates.map(d=>pm[d]?.qqq_ret_pct??qqqCurr2[d]??null);
+
+  } else {
+    // ── 1M/3M/6M 뷰: BM 사용 + 기간 시작 0% 리베이스
+    const spyMap=Object.fromEntries((BM?.spy||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
+    const qqqMap=Object.fromEntries((BM?.qqq||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
+    const pfDates=perfRecs.map(r=>r.date);
+    const bmDates=Object.keys(spyMap).sort();
+    allDates=[...new Set([...pfDates,...bmDates])].sort();
+
+    portData=rebase(allDates.map(d=>pm[d]?.portfolio_ret_pct??null));
+    spyData =rebase(allDates.map(d=>spyMap[d]??null));
+    qqqData =rebase(allDates.map(d=>qqqMap[d]??null));
+  }
 
   // 리밸런싱 마커
+  if(!allDates.length){if(CHS[key])CHS[key].destroy();delete CHS[key];return;}
   const firstDate=allDates[0], lastDate=allDates[allDates.length-1];
   const rebalIn=rebalDates.filter(d=>d>=firstDate&&d<=lastDate);
+  const rebalLabel=range==='ALL'?'리밸↺':'리밸';
   const annotations={
     zeroline:{type:'line',yMin:0,yMax:0,
-      borderColor:'rgba(255,255,255,.12)',borderWidth:1}
+      borderColor:'rgba(255,255,255,.15)',borderWidth:1,borderDash:[2,4]}
   };
   rebalIn.forEach((d,i)=>{
     annotations['r'+i]={type:'line',xMin:d,xMax:d,
-      borderColor:'rgba(99,102,241,.4)',borderWidth:1,borderDash:[4,4],
-      label:{display:true,content:'리밸',position:'start',
+      borderColor:'rgba(99,102,241,.35)',borderWidth:1,borderDash:[4,4],
+      label:{display:true,content:rebalLabel,position:'start',
         font:{size:9,weight:'bold'},color:'#818cf8',
-        backgroundColor:'rgba(99,102,241,.1)',padding:{x:3,y:2},yAdjust:-2}};
+        backgroundColor:'rgba(99,102,241,.12)',padding:{x:3,y:2},yAdjust:-2}};
   });
 
   if(CHS[key])CHS[key].destroy();
