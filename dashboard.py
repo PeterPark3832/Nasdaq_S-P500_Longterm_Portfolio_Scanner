@@ -961,13 +961,20 @@ function renderPerfChart(canvasId,key){
     qqqData =allDates.map(d=>pm[d]?.qqq_ret_pct??qqqCurr2[d]??null);
 
   } else {
-    // ── 1M/3M/6M 뷰: BM 사용 + 기간 시작 0% 리베이스
-    const spyMap=Object.fromEntries((BM?.spy||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
-    const qqqMap=Object.fromEntries((BM?.qqq||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
+    // ── 1M/3M/6M 뷰: 포트폴리오 첫 체크일부터 공정 비교
+    // BM이 cutDate부터 시작하면 포트폴리오보다 먼저 시작해 유리 → 포트폴리오 첫 측정일 기준으로 맞춤
+    const spyMapAll=Object.fromEntries((BM?.spy||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
+    const qqqMapAll=Object.fromEntries((BM?.qqq||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
     const pfDates=perfRecs.map(r=>r.date);
+
+    // 포트폴리오 첫 측정일 = 공정 비교 시작점
+    const pfStart=pfDates[0]||cutDate;
+    const spyMap=Object.fromEntries(Object.entries(spyMapAll).filter(([d])=>d>=pfStart));
+    const qqqMap=Object.fromEntries(Object.entries(qqqMapAll).filter(([d])=>d>=pfStart));
     const bmDates=Object.keys(spyMap).sort();
     allDates=[...new Set([...pfDates,...bmDates])].sort();
 
+    // 모든 선을 동일 시작점(포트폴리오 첫 측정일)에서 0%로 리베이스
     portData=rebase(allDates.map(d=>pm[d]?.portfolio_ret_pct??null));
     spyData =rebase(allDates.map(d=>spyMap[d]??null));
     qqqData =rebase(allDates.map(d=>qqqMap[d]??null));
