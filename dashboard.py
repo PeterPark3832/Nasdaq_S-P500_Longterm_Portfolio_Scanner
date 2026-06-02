@@ -1,10 +1,11 @@
-import os, json
+import os, json, logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 import uvicorn
 
+log = logging.getLogger("dashboard")
 BASE  = Path(__file__).parent
 TOKEN = os.getenv("DASHBOARD_TOKEN", "scanner2024")
 app   = FastAPI(docs_url=None, redoc_url=None)
@@ -22,6 +23,82 @@ def api_data(token: str = ""):
         "last_rebal":  _load("last_rebal_us.json") or {},
         "updated":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
+
+@app.get("/api/benchmark")
+def api_benchmark(token: str = "", start: str = ""):
+    """SPY/QQQ 일별 누적 수익률 (포트폴리오 시작일 기준).
+    start 파라미터 없으면 portfolio_state_us.json의 month 필드에서 자동 결정.
+    반환: {spy:[{date,ret},...], qqq:[{date,ret},...], start_date, updated}
+    """
+    if token != TOKEN: raise HTTPException(401)
+    try:
+        import yfinance as yf
+        import pandas as pd
+
+        # 시작일 결정
+        if not start:
+            port = _load("portfolio_state_us.json") or {}
+            month = port.get("month", "")
+            if month:
+                start = f"{month}-01"
+            else:
+                start = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+
+        end = datetime.now().strftime("%Y-%m-%d")
+        raw = yf.download(
+            ["SPY", "QQQ"], start=start, end=end,
+            progress=False, auto_adjust=True,
+        )
+
+        # yfinance 버전 따라 MultiIndex 구조 다름 — 정규화
+        if raw.empty:
+            return JSONResponse({"spy": [], "qqq": [], "start_date": start, "updated": end, "error": "no_data"})
+
+        def _extract_close(sym: str) -> pd.Series:
+            """Multi/single-index 모두 처리"""
+            if isinstance(raw.columns, pd.MultiIndex):
+                # (Price, Ticker) 구조
+                if ("Close", sym) in raw.columns:
+                    return raw[("Close", sym)].dropna()
+                # (Ticker, Price) 구조
+                if (sym, "Close") in raw.columns:
+                    return raw[(sym, "Close")].dropna()
+                # group_by="ticker" 없이 내려온 경우 직접 접근
+                try:
+                    return raw[sym]["Close"].dropna()
+                except Exception:
+                    return pd.Series(dtype=float)
+            else:
+                # 단일 종목이면 flat columns
+                if "Close" in raw.columns:
+                    return raw["Close"].dropna()
+                return pd.Series(dtype=float)
+
+        def _to_ret_series(series: pd.Series) -> list[dict]:
+            if series.empty or len(series) < 1:
+                return []
+            base = float(series.iloc[0])
+            if base <= 0:
+                return []
+            return [
+                {"date": str(idx.date()), "ret": round((float(v) / base - 1) * 100, 2)}
+                for idx, v in series.items()
+                if pd.notna(v)
+            ]
+
+        spy_series = _extract_close("SPY")
+        qqq_series = _extract_close("QQQ")
+
+        return JSONResponse({
+            "spy":        _to_ret_series(spy_series),
+            "qqq":        _to_ret_series(qqq_series),
+            "start_date": start,
+            "updated":    end,
+        })
+
+    except Exception as e:
+        log.warning(f"/api/benchmark error: {e}")
+        return JSONResponse({"spy": [], "qqq": [], "start_date": start, "updated": "", "error": str(e)})
 
 @app.get("/", response_class=HTMLResponse)
 def index(token: str = ""):
@@ -403,7 +480,7 @@ const SCOL={
   'Financials':'#3b82f6','Industrials':'#8b5cf6',
   'Cash':'#374151','Unknown':'#94a3b8'
 };
-let D=null,CHS={},RANGE={home:'ALL',perf:'ALL'};
+let D=null,BM=null,CHS={},RANGE={home:'ALL',perf:'ALL'};
 
 const fp=(v,s=true)=>v==null||isNaN(v)?'—':(s&&v>0?'+':'')+v.toFixed(2)+'%';
 const fm=v=>v==null?'—':'$'+v.toFixed(2);
@@ -421,9 +498,14 @@ function go(name){
 
 async function load(){
   try{
-    const r=await fetch('/api/data?token='+TK);
-    if(!r.ok) throw new Error();
-    D=await r.json(); render();
+    const [rD,rB]=await Promise.all([
+      fetch('/api/data?token='+TK),
+      fetch('/api/benchmark?token='+TK),
+    ]);
+    if(!rD.ok) throw new Error('data');
+    D=await rD.json();
+    if(rB.ok){ try{BM=await rB.json();}catch{} }
+    render();
   }catch{
     document.querySelector('.main').innerHTML=
       '<div style="text-align:center;padding:80px;color:#ef4444">데이터 로드 실패</div>';
@@ -441,9 +523,10 @@ function render(){
   const checks=recs.filter(r=>r.type==='performance_check'&&r.portfolio_ret_pct!=null);
   const lat=checks.slice(-1)[0];
   const pr=lat?lat.portfolio_ret_pct:0;
-  const sr=lat?lat.spy_ret_pct:null;
-  const qr=lat?lat.qqq_ret_pct:null;
-  const al=lat?lat.alpha_vs_spy:null;
+  // BM 우선 — 저장 레코드 spy/qqq가 null일 때 실시간 데이터 사용
+  const sr=(BM?.spy?.slice(-1)[0]?.ret)??( lat?.spy_ret_pct??null);
+  const qr=(BM?.qqq?.slice(-1)[0]?.ret)??( lat?.qqq_ret_pct??null);
+  const al=sr!=null?pr-sr:(lat?.alpha_vs_spy??null);
 
   // nav labels
   const mon=p.month||'';
@@ -511,12 +594,36 @@ function renderPerfChart(canvasId,key){
     allRecs.filter(r=>r.type!=='rebalancing'&&r.portfolio_ret_pct!=null),
     RANGE[key]||'ALL'
   );
-  if(!perfRecs.length){if(CHS[key])CHS[key].destroy();delete CHS[key];return;}
 
-  const firstDate=perfRecs[0].date, lastDate=perfRecs[perfRecs.length-1].date;
-  // 리밸런싱 날짜를 labels에 삽입해 순서 보장, 데이터는 null
+  // BM 데이터를 날짜→수익률 맵으로 변환
+  const range=RANGE[key]||'ALL';
+  const days={'1M':30,'3M':90,'6M':180}[range];
+  const cutDate=days?new Date(Date.now()-days*864e5).toISOString().slice(0,10):'0000-00-00';
+  const spyBM=Object.fromEntries((BM?.spy||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
+  const qqqBM=Object.fromEntries((BM?.qqq||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
+
+  // 포트폴리오 레코드가 없어도 BM 데이터만 있으면 차트 그릴 수 있게
+  const bmDates=Object.keys(spyBM).sort();
+  if(!perfRecs.length && !bmDates.length){
+    if(CHS[key])CHS[key].destroy();delete CHS[key];
+    // 빈 상태 표시
+    const parent=ctx.parentElement;
+    if(parent && !parent.querySelector('.no-data')){
+      const msg=document.createElement('p');
+      msg.className='no-data';
+      msg.style.cssText='color:#64748b;font-size:13px;text-align:center;padding:24px';
+      msg.textContent='성과 데이터 없음 (봇 가동 후 07:00 KST에 자동 수집됩니다)';
+      parent.appendChild(msg);
+    }
+    return;
+  }
+
+  // 날짜 통합: 성과 레코드 + BM 날짜 + 리밸런싱 날짜
+  const pfDates=perfRecs.map(r=>r.date);
+  const firstDate=pfDates[0]||bmDates[0]||'';
+  const lastDate=pfDates[pfDates.length-1]||bmDates[bmDates.length-1]||'';
   const rebalIn=rebalDates.filter(d=>d>firstDate&&d<lastDate);
-  const allDates=[...new Set([...perfRecs.map(r=>r.date),...rebalIn])].sort();
+  const allDates=[...new Set([...pfDates,...bmDates,...rebalIn])].sort();
   const pm=Object.fromEntries(perfRecs.map(r=>[r.date,r]));
 
   const annotations={};
@@ -539,11 +646,12 @@ function renderPerfChart(canvasId,key){
        borderColor:'#00C6A9',backgroundColor:'rgba(0,198,169,.1)',
        borderWidth:2.5,pointRadius:big?0:5,fill:true,tension:.3,spanGaps:true},
       {label:'SPY',
-       data:allDates.map(d=>pm[d]?.spy_ret_pct??null),
+       // BM 실시간 우선, 없으면 저장된 값 fallback
+       data:allDates.map(d=>spyBM[d]??pm[d]?.spy_ret_pct??null),
        borderColor:'#6366f1',backgroundColor:'transparent',
        borderWidth:1.5,borderDash:[6,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
       {label:'QQQ',
-       data:allDates.map(d=>pm[d]?.qqq_ret_pct??null),
+       data:allDates.map(d=>qqqBM[d]??pm[d]?.qqq_ret_pct??null),
        borderColor:'#f59e0b',backgroundColor:'transparent',
        borderWidth:1.5,borderDash:[3,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
     ]},
@@ -656,16 +764,27 @@ function renderCards(id,holdings){
 function renderPerfKPIs(checks){
   const el=document.getElementById('perf-kpis');if(!el)return;
   const lat=checks.slice(-1)[0];
+  const latPr=lat?.portfolio_ret_pct??null;
+  // BM 실시간 데이터 우선 사용
+  const latSpy=(BM?.spy?.slice(-1)[0]?.ret)??(lat?.spy_ret_pct??null);
+  const latQqq=(BM?.qqq?.slice(-1)[0]?.ret)??(lat?.qqq_ret_pct??null);
+  const latAlpha=latSpy!=null&&latPr!=null?latPr-latSpy:(lat?.alpha_vs_spy??null);
   const alphas=checks.filter(r=>r.alpha_vs_spy!=null).map(r=>r.alpha_vs_spy);
   const avgA=alphas.length?alphas.reduce((a,b)=>a+b,0)/alphas.length:null;
   const ks=[
-    {l:'최근 수익률',v:fp(lat?.portfolio_ret_pct),c:fc(lat?.portfolio_ret_pct||0)},
-    {l:'최근 Alpha vs SPY',v:lat?.alpha_vs_spy!=null?fp(lat.alpha_vs_spy)+'p':'—',c:fc(lat?.alpha_vs_spy||0)},
-    {l:'평균 Alpha',v:avgA!=null?fp(avgA)+'p':'—',c:fc(avgA||0)},
+    {l:'최근 수익률',v:fp(latPr),c:fc(latPr||0)},
+    {l:'SPY 대비 Alpha',v:latAlpha!=null?fp(latAlpha)+'p':'—',c:fc(latAlpha||0),
+     s:latSpy!=null?'SPY '+fp(latSpy):''},
+    {l:'QQQ 대비 Alpha',v:latQqq!=null&&latPr!=null?fp(latPr-latQqq)+'p':'—',
+     c:fc(latQqq!=null&&latPr!=null?latPr-latQqq:0),
+     s:latQqq!=null?'QQQ '+fp(latQqq):''},
+    {l:'평균 Alpha vs SPY',v:avgA!=null?fp(avgA)+'p':'—',c:fc(avgA||0)},
   ];
   el.innerHTML=ks.map(k=>
     `<div class="card"><div class="ctitle">${k.l}</div>
-     <div class="kval ${k.c}" style="font-size:28px">${k.v}</div></div>`
+     <div class="kval ${k.c}" style="font-size:26px">${k.v}</div>
+     ${k.s?`<div class="ksub" style="font-size:12px;margin-top:4px">${k.s}</div>`:''}
+     </div>`
   ).join('');
 }
 

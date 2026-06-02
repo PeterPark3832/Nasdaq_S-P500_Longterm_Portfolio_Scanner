@@ -130,18 +130,28 @@ def build_performance_brief(portfolio: dict) -> str:
     qqq_ret: float | None = None
     try:
         bench_raw = yf.download(["SPY", "QQQ"], start=bench_ref,
-                                progress=False, auto_adjust=True, group_by="ticker")
-        for sym, var in [("SPY", "spy"), ("QQQ", "qqq")]:
+                                progress=False, auto_adjust=True)
+        for sym in ["SPY", "QQQ"]:
             try:
-                df_b = bench_raw[sym].dropna(how="all")
-                if not df_b.empty and len(df_b) >= 2:
-                    val = float(df_b["Close"].iloc[-1] / df_b["Close"].iloc[0] - 1) * 100
-                    if var == "spy":
-                        spy_ret = round(val, 2)
+                # MultiIndex (yfinance >= 0.2): columns = (Price, Ticker) or (Ticker, Price)
+                if isinstance(bench_raw.columns, pd.MultiIndex):
+                    if ("Close", sym) in bench_raw.columns:
+                        s = bench_raw[("Close", sym)].dropna()
+                    elif (sym, "Close") in bench_raw.columns:
+                        s = bench_raw[(sym, "Close")].dropna()
                     else:
-                        qqq_ret = round(val, 2)
-            except Exception:
-                pass
+                        s = bench_raw.xs(sym, axis=1, level=1)["Close"].dropna()
+                else:
+                    # 단일 종목 flat columns
+                    s = bench_raw["Close"].dropna()
+                if len(s) >= 2:
+                    val = round(float(s.iloc[-1] / s.iloc[0] - 1) * 100, 2)
+                    if sym == "SPY":
+                        spy_ret = val
+                    else:
+                        qqq_ret = val
+            except Exception as ex:
+                log.debug(f"벤치마크 파싱 실패 {sym}: {ex}")
     except Exception as e:
         log.warning(f"벤치마크 다운로드 실패: {e}")
 
