@@ -33,12 +33,14 @@ def api_benchmark(token: str = "", start: str = ""):
         import pandas as pd
 
         if not start:
-            port = _load("portfolio_state_us.json") or {}
-            month = port.get("month", "")
-            if month:
-                start = f"{month}-01"
+            perf = _load("performance_history.json") or {}
+            records = perf.get("records", [])
+            if records:
+                start = records[0]["date"]   # 첫 리밸런싱일 기준 (포트폴리오 진입가와 동일 기준점)
             else:
-                start = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+                port = _load("portfolio_state_us.json") or {}
+                month = port.get("month", "")
+                start = f"{month}-01" if month else (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
 
         end = datetime.now().strftime("%Y-%m-%d")
         raw = yf.download(
@@ -127,7 +129,10 @@ code{color:#6C5CE7;background:rgba(108,92,231,.1);padding:2px 8px;border-radius:
 <div class="t">접근 제한</div>
 <p style="color:#8892a5;font-size:14px;margin-top:8px">URL에 <code>?token=scanner2024</code> 추가</p>
 </div></body></html>""")
-    return HTMLResponse(MAIN.replace("__TOKEN__", token))
+    return HTMLResponse(
+        MAIN.replace("__TOKEN__", token),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
 
 MAIN = r"""<!DOCTYPE html>
 <html lang="ko">
@@ -558,9 +563,9 @@ tr:last-child td{border-bottom:none}
         <div class="ctitle">성과 추이 — 포트폴리오 vs SPY vs QQQ</div>
         <div class="cf">
           <span class="cf-lbl">기간</span>
-          <button class="cfbtn" onclick="setRange('1M','home')">1M</button>
-          <button class="cfbtn" onclick="setRange('3M','home')">3M</button>
-          <button class="cfbtn" onclick="setRange('6M','home')">6M</button>
+          <button class="cfbtn" id="cfbtn-home-1M" onclick="setRange('1M','home')">1M</button>
+          <button class="cfbtn" id="cfbtn-home-3M" onclick="setRange('3M','home')">3M</button>
+          <button class="cfbtn" id="cfbtn-home-6M" onclick="setRange('6M','home')">6M</button>
           <button class="cfbtn on" id="cfbtn-home-ALL" onclick="setRange('ALL','home')">ALL</button>
         </div>
         <canvas id="ch-home" height="220"></canvas>
@@ -602,9 +607,9 @@ tr:last-child td{border-bottom:none}
       <div class="ctitle">누적 수익률 추이</div>
       <div class="cf">
         <span class="cf-lbl">기간</span>
-        <button class="cfbtn" onclick="setRange('1M','perf')">1M</button>
-        <button class="cfbtn" onclick="setRange('3M','perf')">3M</button>
-        <button class="cfbtn" onclick="setRange('6M','perf')">6M</button>
+        <button class="cfbtn" id="cfbtn-perf-1M" onclick="setRange('1M','perf')">1M</button>
+        <button class="cfbtn" id="cfbtn-perf-3M" onclick="setRange('3M','perf')">3M</button>
+        <button class="cfbtn" id="cfbtn-perf-6M" onclick="setRange('6M','perf')">6M</button>
         <button class="cfbtn on" id="cfbtn-perf-ALL" onclick="setRange('ALL','perf')">ALL</button>
       </div>
       <canvas id="ch-perf" height="200"></canvas>
@@ -1012,7 +1017,8 @@ function setRange(range,key){
     const b=document.getElementById(`cfbtn-${key}-${r}`);
     if(b)b.classList.toggle('on',r===range);
   });
-  delete CHS[key];
+  // destroy() 먼저 호출해야 canvas에 구 차트가 남지 않음
+  if(CHS[key]){CHS[key].destroy();delete CHS[key];}
   renderPerfChart('ch-'+key,key);
 }
 
@@ -1021,73 +1027,112 @@ function renderPerfChart(canvasId,key){
   if(!D)return;
   const ctx=document.getElementById(canvasId);
   if(!ctx)return;
+
+  const range=RANGE[key]||'ALL';
   const allRecs=D.performance.records||[];
   const rebalDates=allRecs.filter(r=>r.type==='rebalancing').map(r=>r.date);
+
+  const nDays={'1M':30,'3M':90,'6M':180}[range];
+  const cutDate=nDays?new Date(Date.now()-nDays*864e5).toISOString().slice(0,10):'0000-00-00';
+
   const perfRecs=filterByRange(
     allRecs.filter(r=>r.type!=='rebalancing'&&r.portfolio_ret_pct!=null),
-    RANGE[key]||'ALL'
+    range
   );
-  const range=RANGE[key]||'ALL';
-  const days={'1M':30,'3M':90,'6M':180}[range];
-  const cutDate=days?new Date(Date.now()-days*864e5).toISOString().slice(0,10):'0000-00-00';
-  const spyBM=Object.fromEntries((BM?.spy||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
-  const qqqBM=Object.fromEntries((BM?.qqq||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
+  const pm=Object.fromEntries(perfRecs.map(r=>[r.date,r]));
+
+  function rebase(arr){
+    const base=arr.find(v=>v!=null);
+    if(base==null)return arr;
+    return arr.map(v=>v==null?null:parseFloat((v-base).toFixed(2)));
+  }
+
+  // 모든 범위: 포트폴리오 첫 측정일 기준으로 BM 시작 맞춤 → 공정 비교
+  // ALL/3M/6M: 데이터 짧으면 동일 (논리적으로 정확)
+  const spyAll=Object.fromEntries((BM?.spy||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
+  const qqqAll=Object.fromEntries((BM?.qqq||[]).filter(p=>p.date>=cutDate).map(p=>[p.date,p.ret]));
+  const pfDates=perfRecs.map(r=>r.date);
+  const pfStart=pfDates[0]||cutDate;
+  const spyBM=Object.fromEntries(Object.entries(spyAll).filter(([d])=>d>=pfStart));
+  const qqqBM=Object.fromEntries(Object.entries(qqqAll).filter(([d])=>d>=pfStart));
   const bmDates=Object.keys(spyBM).sort();
-  if(!perfRecs.length&&!bmDates.length){
-    if(CHS[key])CHS[key].destroy();delete CHS[key];
-    const parent=ctx.parentElement;
-    if(parent&&!parent.querySelector('.no-data')){
-      const msg=document.createElement('p');
-      msg.className='no-data';
-      msg.style.cssText='color:var(--mu);font-size:13px;text-align:center;padding:24px';
-      msg.textContent='성과 데이터 없음 (봇 가동 후 07:00 KST에 자동 수집됩니다)';
-      parent.appendChild(msg);
-    }
+  const allDates=[...new Set([...pfDates,...bmDates])].sort();
+
+  if(!allDates.length){
+    if(CHS[key]){CHS[key].destroy();delete CHS[key];}
     return;
   }
-  const pfDates=perfRecs.map(r=>r.date);
-  const firstDate=pfDates[0]||bmDates[0]||'';
-  const lastDate=pfDates[pfDates.length-1]||bmDates[bmDates.length-1]||'';
-  const rebalIn=rebalDates.filter(d=>d>firstDate&&d<lastDate);
-  const allDates=[...new Set([...pfDates,...bmDates,...rebalIn])].sort();
-  const pm=Object.fromEntries(perfRecs.map(r=>[r.date,r]));
-  const annotations={};
+
+  const portData=rebase(allDates.map(d=>pm[d]?.portfolio_ret_pct??null));
+  const spyData =rebase(allDates.map(d=>spyBM[d]??null));
+  const qqqData =rebase(allDates.map(d=>qqqBM[d]??null));
+
+  const firstDate=allDates[0], lastDate=allDates[allDates.length-1];
+  const rebalIn=rebalDates.filter(d=>d>=firstDate&&d<=lastDate);
+  const annotations={
+    zeroline:{type:'line',yMin:0,yMax:0,
+      borderColor:'rgba(108,92,231,.2)',borderWidth:1,borderDash:[2,4]}
+  };
   rebalIn.forEach((d,i)=>{
     annotations['r'+i]={type:'line',xMin:d,xMax:d,
-      borderColor:'rgba(108,92,231,.35)',borderWidth:1.5,borderDash:[4,4],
+      borderColor:'rgba(108,92,231,.3)',borderWidth:1.5,borderDash:[4,4],
       label:{display:true,content:'리밸',position:'start',
         font:{size:9,weight:'bold'},color:'#6C5CE7',
         backgroundColor:'rgba(108,92,231,.1)',padding:{x:4,y:2},yAdjust:-4}};
   });
-  if(CHS[key])CHS[key].destroy();
+
+  // 구 차트 완전 제거 (안전망)
+  if(CHS[key]){CHS[key].destroy();delete CHS[key];}
+  const existing=Chart.getChart(ctx);
+  if(existing)existing.destroy();
   const big=allDates.length>60;
+
   CHS[key]=new Chart(ctx,{
     type:'line',
     data:{labels:allDates,datasets:[
-      {label:'포트폴리오',
-       data:allDates.map(d=>pm[d]?.portfolio_ret_pct??null),
+      {label:'포트폴리오',data:portData,
        borderColor:'#6C5CE7',backgroundColor:'rgba(108,92,231,.07)',
-       borderWidth:2.5,pointRadius:big?0:5,fill:true,tension:.3,spanGaps:true},
-      {label:'SPY',
-       data:allDates.map(d=>spyBM[d]??pm[d]?.spy_ret_pct??null),
+       borderWidth:2.5,pointRadius:big?0:4,pointHoverRadius:6,
+       fill:true,tension:.3,spanGaps:true},
+      {label:'SPY',data:spyData,
        borderColor:'#00b894',backgroundColor:'transparent',
-       borderWidth:1.5,borderDash:[6,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
-      {label:'QQQ',
-       data:allDates.map(d=>qqqBM[d]??pm[d]?.qqq_ret_pct??null),
+       borderWidth:1.5,borderDash:[6,3],pointRadius:0,pointHoverRadius:5,
+       fill:false,tension:.3,spanGaps:true},
+      {label:'QQQ',data:qqqData,
        borderColor:'#e17055',backgroundColor:'transparent',
-       borderWidth:1.5,borderDash:[3,3],pointRadius:big?0:4,tension:.3,spanGaps:true},
+       borderWidth:1.5,borderDash:[3,3],pointRadius:0,pointHoverRadius:5,
+       fill:false,tension:.3,spanGaps:true},
     ]},
     options:{responsive:true,
+      interaction:{mode:'index',intersect:false},
       plugins:{
-        legend:{labels:{color:'#8892a5',font:{size:12}}},
-        tooltip:{mode:'index',intersect:false,
-          filter:i=>i.raw!=null,
-          callbacks:{label:c=>` ${c.dataset.label}: ${c.raw!=null?c.raw.toFixed(2)+'%':'—'}`}},
-        annotation:{annotations}},
+        legend:{labels:{color:'#8892a5',font:{size:12},
+          usePointStyle:true,pointStyleWidth:10,boxHeight:8,padding:14}},
+        tooltip:{
+          backgroundColor:'rgba(26,23,68,.95)',borderColor:'rgba(108,92,231,.2)',
+          borderWidth:1,padding:12,titleColor:'#fff',bodyColor:'#c8c5e8',
+          callbacks:{
+            label:c=>{
+              if(c.raw==null)return null;
+              return` ${c.dataset.label}: ${c.raw>0?'+':''}${c.raw.toFixed(2)}%`;
+            },
+            afterBody:items=>{
+              const p=items.find(i=>i.dataset.label==='포트폴리오');
+              const s=items.find(i=>i.dataset.label==='SPY');
+              if(p?.raw!=null&&s?.raw!=null){
+                const a=(p.raw-s.raw).toFixed(2);
+                return['─────────',` Alpha vs SPY: ${a>0?'+':''}${a}%p`];
+              }
+              return[];
+            }
+          }
+        },
+        annotation:{annotations}
+      },
       scales:{
-        x:{ticks:{color:'#8892a5',maxTicksLimit:8},
+        x:{ticks:{color:'#8892a5',maxTicksLimit:8,font:{size:11}},
            grid:{color:'rgba(108,92,231,.06)'}},
-        y:{ticks:{color:'#8892a5',callback:v=>v+'%'},
+        y:{ticks:{color:'#8892a5',font:{size:11},callback:v=>(v>0?'+':'')+v+'%'},
            grid:{color:'rgba(108,92,231,.06)'}}
       }}
   });
