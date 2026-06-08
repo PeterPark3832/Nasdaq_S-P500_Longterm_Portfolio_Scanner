@@ -1,4 +1,4 @@
-import os, json, logging
+import os, json, logging, re
 from pathlib import Path
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
@@ -123,9 +123,10 @@ body{background:#EEEEFF;color:#1a1a3e;font-family:system-ui,sans-serif;
   display:flex;align-items:center;justify-content:center;min-height:100vh}
 .c{background:#fff;border:1px solid rgba(108,92,231,.12);border-radius:20px;
   padding:48px 40px;text-align:center;box-shadow:0 8px 32px rgba(108,92,231,.1)}
-.lock{font-size:52px;margin-bottom:20px}.t{font-size:22px;font-weight:800;margin-bottom:8px}
+.lock{margin-bottom:20px;color:#6C5CE7}.lock svg{width:52px;height:52px}
+.t{font-size:22px;font-weight:800;margin-bottom:8px}
 code{color:#6C5CE7;background:rgba(108,92,231,.1);padding:2px 8px;border-radius:4px;font-size:13px}
-</style></head><body><div class="c"><div class="lock">🔒</div>
+</style></head><body><div class="c"><div class="lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
 <div class="t">접근 제한</div>
 <p style="color:#8892a5;font-size:14px;margin-top:8px">URL에 <code>?token=scanner2024</code> 추가</p>
 </div></body></html>""")
@@ -516,7 +517,7 @@ tr:last-child td{border-bottom:none}
 <!-- ══ SIDEBAR (PC + Tablet) ══ -->
 <nav class="sidebar" id="sidebar">
   <div class="sb-brand">
-    <div class="sb-icon-wrap">📈</div>
+    <div class="sb-icon-wrap">{{ic:trend}}</div>
     <div class="sb-brand-text">
       <div class="sb-name">US Portfolio</div>
       <div class="sb-live"><div class="dot"></div>Live</div>
@@ -524,13 +525,13 @@ tr:last-child td{border-bottom:none}
   </div>
   <div class="sb-month" id="sb-month"></div>
   <ul class="sidenav">
-    <li class="snitem on" onclick="go('home')"><span class="sn-ic">🏠</span><span class="sn-text">홈</span></li>
-    <li class="snitem"   onclick="go('port')"><span class="sn-ic">📊</span><span class="sn-text">포트폴리오</span></li>
-    <li class="snitem"   onclick="go('perf')"><span class="sn-ic">📈</span><span class="sn-text">성과 분석</span></li>
-    <li class="snitem"   onclick="go('risk')"><span class="sn-ic">⚠️</span><span class="sn-text">리스크</span></li>
-    <li class="snitem"   onclick="go('changes')"><span class="sn-ic">🔄</span><span class="sn-text">변경 내역</span></li>
-    <li class="snitem"   onclick="go('logs')"><span class="sn-ic">📋</span><span class="sn-text">로그</span></li>
-    <li class="snitem"   onclick="go('roadmap')"><span class="sn-ic">🗺️</span><span class="sn-text">로드맵</span></li>
+    <li class="snitem on" onclick="go('home')"><span class="sn-ic">{{ic:home}}</span><span class="sn-text">홈</span></li>
+    <li class="snitem"   onclick="go('port')"><span class="sn-ic">{{ic:portfolio}}</span><span class="sn-text">포트폴리오</span></li>
+    <li class="snitem"   onclick="go('perf')"><span class="sn-ic">{{ic:trend}}</span><span class="sn-text">성과 분석</span></li>
+    <li class="snitem"   onclick="go('risk')"><span class="sn-ic">{{ic:risk}}</span><span class="sn-text">리스크</span></li>
+    <li class="snitem"   onclick="go('changes')"><span class="sn-ic">{{ic:changes}}</span><span class="sn-text">변경 내역</span></li>
+    <li class="snitem"   onclick="go('logs')"><span class="sn-ic">{{ic:logs}}</span><span class="sn-text">로그</span></li>
+    <li class="snitem"   onclick="go('roadmap')"><span class="sn-ic">{{ic:roadmap}}</span><span class="sn-text">로드맵</span></li>
   </ul>
   <div class="sb-footer">
     <div class="sb-clock" id="sb-clock"></div>
@@ -541,7 +542,7 @@ tr:last-child td{border-bottom:none}
 <!-- ══ MOBILE TOP BAR ══ -->
 <div class="topbar">
   <div class="tb-logo">
-    <div class="tb-icon">📈</div>
+    <div class="tb-icon">{{ic:trend}}</div>
     <span class="tb-txt">US Portfolio</span>
     <span class="tb-month" id="tb-month"></span>
   </div>
@@ -635,9 +636,9 @@ tr:last-child td{border-bottom:none}
           <div id="vix-regime"></div>
           <div class="tw"><table>
             <tr><th>레짐</th><th>조건</th><th>현금비중</th></tr>
-            <tr><td>🟢 정상</td><td>VIX &lt; 30</td><td>30%</td></tr>
-            <tr><td>🟡 주의</td><td>VIX ≥ 30</td><td>50%</td></tr>
-            <tr><td>🔴 공포</td><td>VIX ≥ 40</td><td>60%</td></tr>
+            <tr><td>{{ic:dot-gn}} 정상</td><td>VIX &lt; 30</td><td>30%</td></tr>
+            <tr><td>{{ic:dot-yw}} 주의</td><td>VIX ≥ 30</td><td>50%</td></tr>
+            <tr><td>{{ic:dot-rd}} 공포</td><td>VIX ≥ 40</td><td>60%</td></tr>
           </table></div>
         </div>
         <div class="card">
@@ -664,23 +665,23 @@ tr:last-child td{border-bottom:none}
     </div>
     <div class="g4" id="chg-kpis"></div>
     <div id="chg-new-wrap" class="mb18">
-      <div class="chg-hdr"><span class="chg-title">🟢 신규 편입</span><span class="chg-cnt" id="cnt-new">0종목</span></div>
+      <div class="chg-hdr"><span class="chg-title">{{ic:dot-gn}} 신규 편입</span><span class="chg-cnt" id="cnt-new">0종목</span></div>
       <div class="ch-grid" id="chg-new"></div>
     </div>
     <div id="chg-exit-wrap" class="mb18">
-      <div class="chg-hdr"><span class="chg-title">🔴 편출</span><span class="chg-cnt" id="cnt-exit">0종목</span></div>
+      <div class="chg-hdr"><span class="chg-title">{{ic:dot-rd}} 편출</span><span class="chg-cnt" id="cnt-exit">0종목</span></div>
       <div class="ch-grid" id="chg-exit"></div>
     </div>
     <div id="chg-up-wrap" class="mb18">
-      <div class="chg-hdr"><span class="chg-title">🔼 비중 확대</span><span class="chg-cnt" id="cnt-up">0종목</span></div>
+      <div class="chg-hdr"><span class="chg-title">{{ic:up}} 비중 확대</span><span class="chg-cnt" id="cnt-up">0종목</span></div>
       <div class="ch-grid" id="chg-up"></div>
     </div>
     <div id="chg-dn-wrap" class="mb18">
-      <div class="chg-hdr"><span class="chg-title">🔽 비중 축소</span><span class="chg-cnt" id="cnt-dn">0종목</span></div>
+      <div class="chg-hdr"><span class="chg-title">{{ic:down}} 비중 축소</span><span class="chg-cnt" id="cnt-dn">0종목</span></div>
       <div class="ch-grid" id="chg-dn"></div>
     </div>
     <div>
-      <div class="chg-hdr"><span class="chg-title">⚪ 유지</span><span class="chg-cnt" id="cnt-keep">0종목</span></div>
+      <div class="chg-hdr"><span class="chg-title">{{ic:dot-mu}} 유지</span><span class="chg-cnt" id="cnt-keep">0종목</span></div>
       <div class="ch-grid" id="chg-keep"></div>
     </div>
   </div>
@@ -710,7 +711,7 @@ tr:last-child td{border-bottom:none}
     </div>
     <div class="card">
       <div class="rm-section">
-        <div class="rm-title">✅ 완료</div>
+        <div class="rm-title">{{ic:check}} 완료</div>
         <div class="rm-item"><div class="rm-dot rm-done"></div><div class="rm-body">
           <div class="rm-name">미국주식 롱텀 포트폴리오 봇 v4.11</div>
           <div class="rm-desc">Nasdaq/S&P500 ~500종목 스캔, 모멘텀+재무 복합 스코어링, 월간 리밸런싱, 텔레그램 브리핑</div>
@@ -737,7 +738,7 @@ tr:last-child td{border-bottom:none}
           <span class="rm-tag rm-tag-done">완료</span></div></div>
       </div>
       <div class="rm-section">
-        <div class="rm-title">🔧 진행 중</div>
+        <div class="rm-title">{{ic:tool}} 진행 중</div>
         <div class="rm-item"><div class="rm-dot rm-wip"></div><div class="rm-body">
           <div class="rm-name">유니버스 품질 개선 — 상장폐지 종목 자동 제거</div>
           <div class="rm-desc">SPLK, ANSS 등 M&A/상폐 종목이 유니버스에 남아 매월 에러 발생. 자동 정리 로직 추가 예정</div>
@@ -748,7 +749,7 @@ tr:last-child td{border-bottom:none}
           <span class="rm-tag rm-tag-wip">진행중</span></div></div>
       </div>
       <div class="rm-section">
-        <div class="rm-title">📌 계획</div>
+        <div class="rm-title">{{ic:pin}} 계획</div>
         <div class="rm-item"><div class="rm-dot rm-plan"></div><div class="rm-body">
           <div class="rm-name">매매 실행 체크리스트 탭</div>
           <div class="rm-desc">이번 달 매도 순서 → 매수 순서 가이드, 각 종목 실행 완료 체크 기능</div>
@@ -763,7 +764,7 @@ tr:last-child td{border-bottom:none}
           <span class="rm-tag rm-tag-plan">계획</span></div></div>
       </div>
       <div class="rm-section">
-        <div class="rm-title">💡 아이디어</div>
+        <div class="rm-title">{{ic:idea}} 아이디어</div>
         <div class="rm-item"><div class="rm-dot rm-idea"></div><div class="rm-body">
           <div class="rm-name">멀티 전략 포트폴리오</div>
           <div class="rm-desc">현재 전략 D 외에 모멘텀 위주 전략 A, 가치주 전략 B 병행 추적</div>
@@ -781,13 +782,13 @@ tr:last-child td{border-bottom:none}
 <!-- ══ MOBILE BOTTOM NAV ══ -->
 <nav class="mnav">
   <div class="mnavitems">
-    <button class="mnavitem on" onclick="go('home')"><span class="mic">🏠</span><span>홈</span></button>
-    <button class="mnavitem"   onclick="go('port')"><span class="mic">📊</span><span>포트폴리오</span></button>
-    <button class="mnavitem"   onclick="go('perf')"><span class="mic">📈</span><span>성과</span></button>
-    <button class="mnavitem"   onclick="go('risk')"><span class="mic">⚠️</span><span>리스크</span></button>
-    <button class="mnavitem"   onclick="go('changes')"><span class="mic">🔄</span><span>변경</span></button>
-    <button class="mnavitem"   onclick="go('logs')"><span class="mic">📋</span><span>로그</span></button>
-    <button class="mnavitem"   onclick="go('roadmap')"><span class="mic">🗺️</span><span>로드맵</span></button>
+    <button class="mnavitem on" onclick="go('home')"><span class="mic">{{ic:home}}</span><span>홈</span></button>
+    <button class="mnavitem"   onclick="go('port')"><span class="mic">{{ic:portfolio}}</span><span>포트폴리오</span></button>
+    <button class="mnavitem"   onclick="go('perf')"><span class="mic">{{ic:trend}}</span><span>성과</span></button>
+    <button class="mnavitem"   onclick="go('risk')"><span class="mic">{{ic:risk}}</span><span>리스크</span></button>
+    <button class="mnavitem"   onclick="go('changes')"><span class="mic">{{ic:changes}}</span><span>변경</span></button>
+    <button class="mnavitem"   onclick="go('logs')"><span class="mic">{{ic:logs}}</span><span>로그</span></button>
+    <button class="mnavitem"   onclick="go('roadmap')"><span class="mic">{{ic:roadmap}}</span><span>로드맵</span></button>
   </div>
 </nav>
 
@@ -938,7 +939,7 @@ function render(){
   const al=sr!=null?pr-sr:(lat?.alpha_vs_spy??null);
   const mon=p.month||'';
 
-  document.getElementById('sb-month').textContent=mon?'📅 '+mon:'';
+  document.getElementById('sb-month').innerHTML=mon?'{{ic:calendar}} '+mon:'';
   document.getElementById('tb-month').textContent=mon?mon:'';
   document.getElementById('sb-upd').textContent='갱신 '+updated;
   document.getElementById('home-sub').textContent=
@@ -1179,7 +1180,7 @@ function renderTable(id,holdings,detail){
     const wb=`<div class="wb"><div class="wbg"><div class="wbf" style="width:${Math.min(h.weight/15*100,100)}%"></div></div><span class="wpct">${h.weight.toFixed(1)}%</span></div>`;
     const sc=h.score>=80?'pos':h.score>=60?'':'neg';
     if(detail)return`<tr>
-      <td>${h.data_stale?'⚠️':'✅'}</td>
+      <td>${h.data_stale?'{{ic:warn}}':'{{ic:check}}'}</td>
       <td><b style="color:var(--accent)">${h.ticker}</b></td>
       <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;color:var(--mu)">${h.name}</td>
       <td><span class="badge bb">${h.sector||'—'}</span></td>
@@ -1292,7 +1293,7 @@ function renderRisk(p,holdings,cw){
       <div class="glabel">MDD 기준 수익률 | 경보: ${MDD}%</div>
     </div>`;
 
-  const [rcl,rl,re]=cw>=50?['r-fear','공포','🔴']:cw>=40?['r-caution','주의','🟡']:['r-normal','정상','🟢'];
+  const [rcl,rl,re]=cw>=50?['r-fear','공포','{{ic:dot-rd}}']:cw>=40?['r-caution','주의','{{ic:dot-yw}}']:['r-normal','정상','{{ic:dot-gn}}'];
   document.getElementById('vix-regime').innerHTML=
     `<div class="regime ${rcl}"><div class="rlabel">${re} ${rl}</div>
      <div class="rsub">현금 비중: ${cw}%</div></div>`;
@@ -1300,8 +1301,8 @@ function renderRisk(p,holdings,cw){
   const alerted=p.last_stoploss_alerts||{};
   document.getElementById('sl-alerts').innerHTML=Object.keys(alerted).length
     ?Object.entries(alerted).map(([t,d])=>
-        `<div class="al al-err">🔴 <b>${t}</b> — 알림: ${d}</div>`).join('')
-    :'<div class="al al-ok">✅ 이번 달 스톱로스 알림 없음</div>';
+        `<div class="al al-err">{{ic:warn}} <b>${t}</b> — 알림: ${d}</div>`).join('')
+    :'<div class="al al-ok">{{ic:check}} 이번 달 스톱로스 알림 없음</div>';
 
   const SL=-15,WN=-10;
   const stks=holdings.filter(h=>h.ticker!=='CASH');
@@ -1310,7 +1311,7 @@ function renderRisk(p,holdings,cw){
     <th>경고(${WN}%)</th><th>스톱로스(${SL}%)</th><th>진입일</th>
   </tr></thead><tbody>${stks.map(h=>{
     const ep=h.entry_price||0;
-    return`<tr><td>${h.ticker in alerted?'🔴':'✅'}</td>
+    return`<tr><td>${h.ticker in alerted?'{{ic:warn}}':'{{ic:check}}'}</td>
       <td><b style="color:var(--accent)">${h.ticker}</b></td>
       <td style="color:var(--mu)">${h.name}</td>
       <td>${fm(ep)}</td>
@@ -1363,6 +1364,40 @@ setInterval(load,300_000);
 </body>
 </html>
 """
+
+# ── Inline SVG icon set (replaces emoji glyphs for consistent cross-platform rendering) ──
+def _ic(paths, sw="2"):
+    return (f'<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" '
+            f'stroke-width="{sw}" stroke-linecap="round" stroke-linejoin="round" '
+            f'xmlns="http://www.w3.org/2000/svg" style="vertical-align:-0.15em;flex-shrink:0">{paths}</svg>')
+
+def _dot(var):
+    return (f'<svg viewBox="0 0 24 24" width="0.6em" height="0.6em" xmlns="http://www.w3.org/2000/svg" '
+            f'style="vertical-align:0.05em;flex-shrink:0"><circle cx="12" cy="12" r="10" fill="var({var})"/></svg>')
+
+ICONS = {
+    'home':      _ic('<path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z"/>'),
+    'portfolio': _ic('<path d="M3 3v16a2 2 0 0 0 2 2h16"/><rect x="7" y="13" width="3" height="5" rx="1"/><rect x="12" y="9" width="3" height="9" rx="1"/><rect x="17" y="5" width="3" height="13" rx="1"/>'),
+    'trend':     _ic('<polyline points="3 17 9 11 13 15 21 6"/><polyline points="15 6 21 6 21 12"/>'),
+    'risk':      _ic('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>'),
+    'changes':   _ic('<path d="M21 12A9 9 0 0 0 6 5.3L3 8"/><path d="M3 4v4h4"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/><path d="M21 16v4h-4"/>'),
+    'logs':      _ic('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h6"/>'),
+    'roadmap':   _ic('<path d="M9 18 3 21V6l6-3 6 3 6-3v15l-6 3-6-3Z"/><path d="M9 3v15"/><path d="M15 6v15"/>'),
+    'calendar':  _ic('<rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 10h16"/><path d="M8 3v4"/><path d="M16 3v4"/>'),
+    'check':     _ic('<path d="M21 11.5a9 9 0 1 1-5.5-8.3"/><path d="M21 5 12 14l-3-3"/>'),
+    'warn':      _ic('<circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M12 16h.01"/>'),
+    'tool':      _ic('<path d="M15 6a4.5 4.5 0 0 1 6 6l-7.5 7.5a2.1 2.1 0 0 1-3-3L18 9a4.5 4.5 0 0 1-6-6L9.5 5.5l3 3Z"/>'),
+    'pin':       _ic('<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/>'),
+    'idea':      _ic('<path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-4 10.5c.7.6 1 1.5 1 2.5h6c0-1 .3-1.9 1-2.5A6 6 0 0 0 12 3Z"/>'),
+    'up':        _ic('<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>'),
+    'down':      _ic('<path d="M12 5v14"/><path d="m6 13 6 6 6-6"/>'),
+    'dot-gn':    _dot('--gn'),
+    'dot-rd':    _dot('--rd'),
+    'dot-yw':    _dot('--yw'),
+    'dot-mu':    _dot('--mu'),
+}
+
+MAIN = re.sub(r'\{\{ic:([\w-]+)\}\}', lambda m: ICONS.get(m.group(1), ''), MAIN)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8502)
