@@ -490,6 +490,37 @@ tr:last-child td{border-bottom:none}
 .chg-cnt{font-size:11px;background:var(--accent-soft);padding:2px 10px;
   border-radius:20px;color:var(--accent);font-weight:600}
 
+/* ══ MODE TOGGLE ══ */
+.mode-sw{display:flex;align-items:center;gap:10px;padding:10px 8px 6px;
+  cursor:pointer;user-select:none;border-top:1px solid var(--bd);margin-top:6px}
+.ms-track{width:40px;height:20px;border-radius:10px;background:var(--bd);
+  position:relative;transition:background .25s;flex-shrink:0}
+.ms-track.new-mode{background:var(--pr)}
+.ms-thumb{position:absolute;top:2px;left:2px;width:16px;height:16px;
+  border-radius:50%;background:#fff;transition:transform .25s;
+  box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.ms-track.new-mode .ms-thumb{transform:translateX(20px)}
+.ms-lbl{font-size:12px;color:var(--mu);transition:color .2s}
+.ms-lbl.new-mode{color:var(--pr);font-weight:700}
+.ms-tb{font-size:10px;padding:2px 7px;border-radius:10px;
+  background:rgba(0,198,169,.18);color:var(--pr);font-weight:700;display:none}
+/* Buy guide */
+.buy-guide{list-style:none}
+.buy-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--bd)}
+.buy-item:last-child{border-bottom:none}
+.buy-num{width:26px;height:26px;border-radius:50%;background:rgba(0,198,169,.15);
+  color:var(--pr);font-size:12px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.buy-info{flex:1;min-width:0}
+.buy-ticker{font-size:14px;font-weight:800;color:var(--pr)}
+.buy-name{font-size:11px;color:var(--mu);margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.buy-right{text-align:right;flex-shrink:0}
+.buy-weight{font-size:15px;font-weight:800}
+.buy-price{font-size:11px;color:var(--mu);margin-top:1px}
+.mode-notice{display:flex;align-items:center;gap:8px;padding:10px 14px;
+  border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;
+  background:rgba(0,198,169,.09);border:1px solid rgba(0,198,169,.2);color:var(--pr)}
 /* ══ ROADMAP ══ */
 .rm-section{margin-bottom:28px}
 .rm-title{font-size:11px;font-weight:700;color:var(--mu);text-transform:uppercase;
@@ -533,6 +564,10 @@ tr:last-child td{border-bottom:none}
     <li class="snitem"   onclick="go('logs')"><span class="sn-ic">{{ic:logs}}</span><span class="sn-text">로그</span></li>
     <li class="snitem"   onclick="go('roadmap')"><span class="sn-ic">{{ic:roadmap}}</span><span class="sn-text">로드맵</span></li>
   </ul>
+  <div class="mode-sw" onclick="toggleMode()">
+    <div class="ms-track" id="ms-track"><div class="ms-thumb"></div></div>
+    <span class="ms-lbl" id="ms-lbl">기존 유저</span>
+  </div>
   <div class="sb-footer">
     <div class="sb-clock" id="sb-clock"></div>
     <div class="sb-upd" id="sb-upd"></div>
@@ -547,6 +582,10 @@ tr:last-child td{border-bottom:none}
     <span class="tb-month" id="tb-month"></span>
   </div>
   <span class="tb-clock" id="tb-clock"></span>
+  <span class="ms-tb" id="tb-mode">신규</span>
+  <div class="mode-sw" onclick="toggleMode()" style="border-top:none;margin-top:0;padding:0">
+    <div class="ms-track" id="ms-track-m"><div class="ms-thumb"></div></div>
+  </div>
 </div>
 
 <div class="main">
@@ -663,26 +702,46 @@ tr:last-child td{border-bottom:none}
       <div class="ptitle">포트폴리오 변경 내역</div>
       <div class="psub" id="chg-sub">최근 리밸런싱 기준</div>
     </div>
-    <div class="g4" id="chg-kpis"></div>
-    <div id="chg-new-wrap" class="mb18">
-      <div class="chg-hdr"><span class="chg-title">{{ic:dot-gn}} 신규 편입</span><span class="chg-cnt" id="cnt-new">0종목</span></div>
-      <div class="ch-grid" id="chg-new"></div>
+
+    <!-- ── 신규 유저 모드 ── -->
+    <div id="new-user-guide-wrap" style="display:none">
+      <div class="mode-notice">🟢 신규 유저 모드 — 현재 포트폴리오 전종목 신규 매수 가이드</div>
+      <div class="card mb16">
+        <div class="ctitle">매수 순서 (비중 높은 순)</div>
+        <ul class="buy-guide" id="buy-guide-list"></ul>
+        <div id="buy-cash-info" style="margin-top:12px;padding:10px 14px;
+          background:var(--s2);border-radius:8px;font-size:13px;font-weight:600;color:var(--mu)"></div>
+        <p style="font-size:11px;color:var(--mu);margin-top:10px;line-height:1.6">
+          ※ 진입가는 최근 리밸런싱 기준 종가입니다<br>
+          ※ CASH는 달러 예수금 또는 MMF로 보유하세요<br>
+          ※ 매도 순서 없이 전부 신규 매수 — 비중 높은 순서 권장
+        </p>
+      </div>
     </div>
-    <div id="chg-exit-wrap" class="mb18">
-      <div class="chg-hdr"><span class="chg-title">{{ic:dot-rd}} 편출</span><span class="chg-cnt" id="cnt-exit">0종목</span></div>
-      <div class="ch-grid" id="chg-exit"></div>
-    </div>
-    <div id="chg-up-wrap" class="mb18">
-      <div class="chg-hdr"><span class="chg-title">{{ic:up}} 비중 확대</span><span class="chg-cnt" id="cnt-up">0종목</span></div>
-      <div class="ch-grid" id="chg-up"></div>
-    </div>
-    <div id="chg-dn-wrap" class="mb18">
-      <div class="chg-hdr"><span class="chg-title">{{ic:down}} 비중 축소</span><span class="chg-cnt" id="cnt-dn">0종목</span></div>
-      <div class="ch-grid" id="chg-dn"></div>
-    </div>
-    <div>
-      <div class="chg-hdr"><span class="chg-title">{{ic:dot-mu}} 유지</span><span class="chg-cnt" id="cnt-keep">0종목</span></div>
-      <div class="ch-grid" id="chg-keep"></div>
+
+    <!-- ── 기존 유저 모드 ── -->
+    <div id="existing-user-view-wrap">
+      <div class="g4" id="chg-kpis"></div>
+      <div id="chg-new-wrap" class="mb18">
+        <div class="chg-hdr"><span class="chg-title">{{ic:dot-gn}} 신규 편입</span><span class="chg-cnt" id="cnt-new">0종목</span></div>
+        <div class="ch-grid" id="chg-new"></div>
+      </div>
+      <div id="chg-exit-wrap" class="mb18">
+        <div class="chg-hdr"><span class="chg-title">{{ic:dot-rd}} 편출</span><span class="chg-cnt" id="cnt-exit">0종목</span></div>
+        <div class="ch-grid" id="chg-exit"></div>
+      </div>
+      <div id="chg-up-wrap" class="mb18">
+        <div class="chg-hdr"><span class="chg-title">{{ic:up}} 비중 확대</span><span class="chg-cnt" id="cnt-up">0종목</span></div>
+        <div class="ch-grid" id="chg-up"></div>
+      </div>
+      <div id="chg-dn-wrap" class="mb18">
+        <div class="chg-hdr"><span class="chg-title">{{ic:down}} 비중 축소</span><span class="chg-cnt" id="cnt-dn">0종목</span></div>
+        <div class="ch-grid" id="chg-dn"></div>
+      </div>
+      <div>
+        <div class="chg-hdr"><span class="chg-title">{{ic:dot-mu}} 유지</span><span class="chg-cnt" id="cnt-keep">0종목</span></div>
+        <div class="ch-grid" id="chg-keep"></div>
+      </div>
     </div>
   </div>
 
@@ -802,6 +861,7 @@ const SCOL={
   'Cash':'#dfe6e9','Unknown':'#b2bec3'
 };
 let D=null,BM=null,CHS={},RANGE={home:'ALL',perf:'ALL'};
+let USER_MODE=localStorage.getItem('userMode')||'existing';
 
 Chart.defaults.color='#8892a5';
 Chart.defaults.borderColor='rgba(108,92,231,.07)';
@@ -831,6 +891,7 @@ async function loadChanges(){
     if(!r.ok)throw new Error();
     const data=await r.json();
     renderChanges(data);
+    renderNewUserGuide();
     _changesLoaded=true;
   }catch{
     document.getElementById('chg-new').innerHTML='<p style="color:var(--rd)">데이터 로드 실패</p>';
@@ -1003,6 +1064,7 @@ function render(){
   renderPerfHistTable(recs);
   renderRisk(p,holdings,cw);
   renderPerfChart('ch-home','home');
+  applyMode();
 }
 
 /* ── DATE FILTER ── */
@@ -1353,6 +1415,53 @@ function renderScore(){
   });
 }
 
+/* ── MODE TOGGLE ── */
+function applyMode(){
+  const isNew=USER_MODE==='new';
+  const tr=document.getElementById('ms-track');
+  const lb=document.getElementById('ms-lbl');
+  if(tr) tr.classList.toggle('new-mode',isNew);
+  if(lb){ lb.textContent=isNew?'신규 유저':'기존 유저'; lb.classList.toggle('new-mode',isNew); }
+  const trm=document.getElementById('ms-track-m');
+  const tbm=document.getElementById('tb-mode');
+  if(trm) trm.classList.toggle('new-mode',isNew);
+  if(tbm) tbm.style.display=isNew?'inline':'none';
+  const ng=document.getElementById('new-user-guide-wrap');
+  const eg=document.getElementById('existing-user-view-wrap');
+  if(ng) ng.style.display=isNew?'block':'none';
+  if(eg) eg.style.display=isNew?'none':'block';
+  if(isNew&&D) renderNewUserGuide();
+}
+
+function toggleMode(){
+  USER_MODE=USER_MODE==='new'?'existing':'new';
+  localStorage.setItem('userMode',USER_MODE);
+  applyMode();
+}
+
+function renderNewUserGuide(){
+  if(!D) return;
+  const stocks=(D.portfolio.holdings||[]).filter(h=>h.ticker!=='CASH')
+    .sort((a,b)=>b.weight-a.weight);
+  const el=document.getElementById('buy-guide-list');
+  if(el) el.innerHTML=stocks.map((h,i)=>`
+    <li class="buy-item">
+      <div class="buy-num">${i+1}</div>
+      <div class="buy-info">
+        <div class="buy-ticker">${h.ticker}</div>
+        <div class="buy-name">${h.name}</div>
+      </div>
+      <div class="buy-right">
+        <div class="buy-weight">${h.weight.toFixed(1)}%</div>
+        <div class="buy-price">기준가 ${fm(h.entry_price)}</div>
+      </div>
+    </li>`).join('');
+  const cash=(D.portfolio.holdings||[]).find(h=>h.ticker==='CASH');
+  const ci=document.getElementById('buy-cash-info');
+  if(ci&&cash) ci.textContent=`💵 현금 (달러 예수금/MMF): ${cash.weight.toFixed(0)}%`;
+}
+
+// 시계
 setInterval(()=>{
   const t=new Date().toLocaleTimeString('ko-KR');
   ['sb-clock','tb-clock'].forEach(id=>{const e=document.getElementById(id);if(e)e.textContent=t});
