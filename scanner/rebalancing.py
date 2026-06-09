@@ -17,8 +17,9 @@ from scanner.data import (
 )
 from scanner.portfolio import (
     load_portfolio, save_portfolio, save_last_rebal,
-    already_ran_this_month, build_rebalancing_brief, save_performance_record,
+    already_ran_this_month, build_rebalancing_brief, is_fresh_start,
 )
+from scanner.performance import save_performance_record
 from scanner.scoring import analyze_ticker, apply_sector_cap, calc_stock_weights
 from scanner.telegram_io import send_telegram, send_telegram_chunks
 from scanner.universe import get_universe_tickers, save_universe_snapshot, load_prev_universe_snapshot
@@ -34,10 +35,31 @@ def _do_monthly_scan() -> None:
     if already_ran_this_month():
         return
 
-    t_start = time.time()
-    log.info(f"[리밸런싱] 시작 — {datetime.now(KST).strftime('%Y-%m-%d %H:%M')}")
+    t_start        = time.time()
+    prev_portfolio = load_portfolio()
+    fresh_start    = is_fresh_start(prev_portfolio)
+
+    # 에피소드 번호 결정
+    if fresh_start and prev_portfolio:
+        episode        = prev_portfolio.get("episode", 1) + 1
+        episode_start  = datetime.now(KST).strftime("%Y-%m-%d")
+    elif fresh_start:
+        episode        = 1
+        episode_start  = datetime.now(KST).strftime("%Y-%m-%d")
+    else:
+        episode        = prev_portfolio.get("episode", 1)
+        episode_start  = prev_portfolio.get("episode_start_date",
+                                            datetime.now(KST).strftime("%Y-%m-%d"))
+
+    mode_label = (
+        f"🆕 에피소드 {episode} — 첫 구성" if (fresh_start and not prev_portfolio) else
+        f"🔄 에피소드 {episode} — 재진입" if fresh_start else
+        f"📅 에피소드 {episode} — 정기 리밸런싱"
+    )
+    log.info(f"[리밸런싱] 시작 — {datetime.now(KST).strftime('%Y-%m-%d %H:%M')} / {mode_label}")
     send_telegram(
-        f"🔄 *{datetime.now(KST).strftime('%Y년 %m월')} 미국주식 리밸런싱 시작*\n"
+        f"{'🔄' if not fresh_start else '🆕'} *{datetime.now(KST).strftime('%Y년 %m월')} 미국주식 리밸런싱 시작*\n"
+        f"{mode_label}\n"
         f"⚙️ D 전략 (재무40+기술20+모멘텀40) / 상위 {STRATEGY['portfolio_size']}종목\n"
         f"⏳ 약 15~30분 소요 (유니버스 ~550종목 분석)..."
     )
@@ -147,9 +169,8 @@ def _do_monthly_scan() -> None:
         weights      = calc_stock_weights(top["total_score"].tolist(), stock_weight)
 
         # ── Step 6. 포트폴리오 빌드 ───────────────────────
-        today_str      = datetime.now(KST).strftime("%Y-%m-%d")
-        prev_portfolio = load_portfolio()
-        prev_map       = {h["ticker"]: h for h in (prev_portfolio or {}).get("holdings", [])}
+        today_str = datetime.now(KST).strftime("%Y-%m-%d")
+        prev_map  = {h["ticker"]: h for h in (prev_portfolio or {}).get("holdings", [])}
 
         new_holdings = [{
             "ticker":      "CASH",
@@ -201,6 +222,7 @@ def _do_monthly_scan() -> None:
         brief = build_rebalancing_brief(
             prev_portfolio, new_holdings,
             vix_level=vix_level, cash_weight=cash_weight,
+            episode=episode,
         )
         send_telegram_chunks(brief)
         save_info_cache()
@@ -213,12 +235,14 @@ def _do_monthly_scan() -> None:
 
         save_portfolio({
             "month":                now_month,
+            "episode":              episode,
+            "episode_start_date":   episode_start,
             "holdings":             new_holdings,
             "max_equity":           0.0,
             "last_stoploss_alerts": {},
         })
         save_last_rebal(now_month)
-        save_performance_record("rebalancing", portfolio_ret_pct=0.0)
+        save_performance_record("rebalancing", portfolio_ret_pct=0.0, episode=episode)
 
         log.info(f"[완료] 리밸런싱 완료 / {elapsed:.0f}초")
         for h in new_holdings:

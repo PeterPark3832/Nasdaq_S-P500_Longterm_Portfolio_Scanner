@@ -60,6 +60,13 @@ def already_ran_this_month() -> bool:
     return last_run == now_month
 
 
+def is_fresh_start(portfolio: dict | None) -> bool:
+    """이전 포트폴리오에 주식 보유가 없으면 신규/재진입 모드."""
+    if not portfolio or not portfolio.get("holdings"):
+        return True
+    return not any(h["ticker"] != "CASH" for h in portfolio["holdings"])
+
+
 # ── 리밸런싱 브리핑 ────────────────────────────────────────────────
 
 def build_rebalancing_brief(
@@ -67,9 +74,10 @@ def build_rebalancing_brief(
     new_holdings: list[dict],
     vix_level: float = 0.0,
     cash_weight: float | None = None,
+    episode: int = 1,
 ) -> str:
     date_str   = datetime.now(KST).strftime("%Y년 %m월")
-    next_month = (datetime.now(KST).replace(day=1) + timedelta(days=32)).strftime("%Y년 %m월")
+    fresh      = is_fresh_start(prev)
 
     if vix_level >= STRATEGY["vix_fear"]:
         regime_str = f"🔴 공포 (VIX {vix_level:.1f}) — 현금 {cash_weight:.0f}%로 확대"
@@ -80,10 +88,19 @@ def build_rebalancing_brief(
     else:
         regime_str = "⚪ VIX 조회 불가"
 
+    # 신규/재진입이면 에피소드 정보 + 다른 제목
+    if fresh and prev and prev.get("holdings"):
+        mode_line = f"🔄 에피소드 {episode} 시작 — 재진입 (오늘 종가 기준 신규 매수)\n"
+    elif fresh:
+        mode_line = f"🆕 에피소드 {episode} 시작 — 첫 구성\n"
+    else:
+        mode_line = f"📅 에피소드 {episode} 진행 중\n"
+
     header = (
         f"📋 *{date_str} 미국주식 포트폴리오 리밸런싱*\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📡 시장 레짐: {regime_str}\n"
+        f"{mode_line}"
         f"🗂 *신규 포트폴리오 (총 {len(new_holdings)}항목)*\n"
     )
 
@@ -107,7 +124,8 @@ def build_rebalancing_brief(
                 f"  6개월 {h['ret_6m']:+.1f}% | 52주위치 {h['w52_pos']}%\n\n"
             )
 
-    change_body = _build_change_section(prev, new_holdings)
+    # 신규/재진입은 before/after 비교 의미 없음 → 생략
+    change_body = "" if fresh else _build_change_section(prev, new_holdings)
 
     data_quality_body = ""
     if stale_tickers:
@@ -165,15 +183,28 @@ def _build_change_section(prev: dict | None, new_holdings: list[dict]) -> str:
 # ── 매매 체크리스트 ────────────────────────────────────────────────
 
 def build_trade_checklist(prev: dict | None, new_holdings: list[dict]) -> str:
-    """매도→축소→확대→신규 매수 순서로 체크리스트 생성."""
-    new_map = {h["ticker"]: h for h in new_holdings if h["ticker"] != "CASH"}
+    """매도→축소→확대→신규 매수 순서로 체크리스트 생성.
+    신규/재진입(is_fresh_start)이면 전종목 신규 매수 가이드로 대체.
+    """
+    new_stocks = [h for h in new_holdings if h["ticker"] != "CASH"]
+    new_map    = {h["ticker"]: h for h in new_stocks}
 
-    if not prev or not prev.get("holdings"):
-        lines = ["📋 *매매 실행 목록 (첫 구성 — 전종목 신규 매수)*"]
-        for h in new_holdings:
-            if h["ticker"] != "CASH":
-                lines.append(f"  🟢 신규 매수: *{h['name']}* ({h['ticker']}) {h['weight']}%")
-        lines.append("\n  ※ CASH 항목은 달러 예수금/MMF로 보유")
+    if is_fresh_start(prev):
+        # 첫 구성 vs 재진입 구분
+        if not prev or not prev.get("holdings"):
+            header = "📋 *매매 실행 목록 (첫 구성 — 전종목 신규 매수)*"
+            footer = "  ※ CASH 항목은 달러 예수금/MMF로 보유"
+        else:
+            header = "📋 *재진입 가이드 — 포트폴리오 재구성*"
+            footer = (
+                "  ※ 이전 포트폴리오 청산 후 재진입\n"
+                "  ※ 오늘 종가 기준 신규 매수 — 수익률 추적 에피소드 새로 시작"
+            )
+        lines = [header]
+        for h in sorted(new_stocks, key=lambda x: -x["weight"]):
+            lines.append(f"  🟢 신규 매수: *{h['name']}* ({h['ticker']}) {h['weight']}%")
+        lines.append("")
+        lines.append(footer)
         return "\n".join(lines)
 
     prev_map  = {h["ticker"]: h for h in prev["holdings"] if h["ticker"] != "CASH"}

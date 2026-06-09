@@ -30,12 +30,14 @@ def save_performance_record(
     portfolio_ret_pct: float,
     spy_ret_pct: float | None = None,
     qqq_ret_pct: float | None = None,
+    episode: int = 1,
 ) -> None:
     """성과 스냅샷 추가. 같은 날 + 같은 type이면 덮어씀."""
     today_str = datetime.now(KST).strftime("%Y-%m-%d")
     new_rec = {
         "date":              today_str,
         "month":             datetime.now(KST).strftime("%Y-%m"),
+        "episode":           episode,
         "type":              record_type,
         "portfolio_ret_pct": round(portfolio_ret_pct, 2),
         "spy_ret_pct":       round(spy_ret_pct, 2) if spy_ret_pct is not None else None,
@@ -155,7 +157,8 @@ def build_performance_brief(portfolio: dict) -> str:
     except Exception as e:
         log.warning(f"벤치마크 다운로드 실패: {e}")
 
-    save_performance_record("performance_check", weighted_ret, spy_ret, qqq_ret)
+    episode = int(portfolio.get("episode", 1))
+    save_performance_record("performance_check", weighted_ret, spy_ret, qqq_ret, episode=episode)
 
     max_eq   = float(portfolio.get("max_equity", weighted_ret))
     peak_ret = max(max_eq, weighted_ret)

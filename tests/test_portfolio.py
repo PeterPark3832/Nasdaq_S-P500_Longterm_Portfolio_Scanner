@@ -3,7 +3,7 @@ Unit tests — scanner.portfolio (pure functions, no file I/O)
 """
 import pytest
 
-from scanner.portfolio import build_trade_checklist
+from scanner.portfolio import build_trade_checklist, is_fresh_start
 from scanner.scoring import calc_stock_weights
 
 
@@ -109,3 +109,56 @@ def test_weights_ordering():
     scores  = [90.0, 60.0]
     weights = calc_stock_weights(scores, 70.0)
     assert weights[0] > weights[1]
+
+
+# ── is_fresh_start ───────────────────────────────────────────────────
+
+def test_fresh_start_none():
+    assert is_fresh_start(None) is True
+
+def test_fresh_start_empty_holdings():
+    assert is_fresh_start({"holdings": []}) is True
+
+def test_fresh_start_cash_only():
+    """CASH만 있으면 신규/재진입으로 취급."""
+    assert is_fresh_start({"holdings": [CASH]}) is True
+
+def test_fresh_start_has_stocks():
+    port = {"holdings": [CASH, _holding("AAPL", "Apple", 40.0)]}
+    assert is_fresh_start(port) is False
+
+
+# ── build_trade_checklist — re-entry ────────────────────────────────
+
+def test_checklist_reentry_after_full_exit():
+    """주식 보유 없는 이전 포트폴리오 → 재진입 가이드 출력."""
+    prev = {"holdings": [CASH]}   # 주식 없음 = 전량 청산 상태
+    new_holdings = [CASH, _holding("AAPL", "Apple", 40.0), _holding("NVDA", "NVIDIA", 30.0)]
+    result = build_trade_checklist(prev, new_holdings)
+    assert "재진입" in result
+    assert "AAPL" in result
+    assert "NVDA" in result
+    assert "에피소드" in result
+
+def test_checklist_reentry_sorted_by_weight():
+    """재진입 체크리스트는 비중 내림차순 정렬."""
+    prev = {"holdings": [CASH]}
+    new_holdings = [
+        CASH,
+        _holding("AAPL", "Apple", 20.0),
+        _holding("NVDA", "NVIDIA", 40.0),
+        _holding("MSFT", "Microsoft", 30.0),
+    ]
+    result = build_trade_checklist(prev, new_holdings)
+    nvda_pos = result.index("NVDA")
+    msft_pos = result.index("MSFT")
+    aapl_pos = result.index("AAPL")
+    assert nvda_pos < msft_pos < aapl_pos   # 40% > 30% > 20%
+
+def test_checklist_fresh_first_time_vs_reentry_different_header():
+    """첫 구성과 재진입은 헤더가 달라야 함."""
+    new_holdings = [CASH, _holding("AAPL", "Apple", 70.0)]
+    first  = build_trade_checklist(None, new_holdings)
+    reentry = build_trade_checklist({"holdings": [CASH]}, new_holdings)
+    assert "첫 구성" in first
+    assert "재진입" in reentry
