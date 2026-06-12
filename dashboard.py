@@ -223,6 +223,7 @@ MAIN = r"""<!DOCTYPE html>
   --bd:rgba(108,92,231,.1);
   --gn:#00b894;
   --gn-s:rgba(0,184,148,.12);
+  --pr:#00c6a9;
   --rd:#e17055;
   --rd-s:rgba(225,112,85,.12);
   --yw:#b8860b;
@@ -554,7 +555,8 @@ tr:last-child td{border-bottom:none}
 
 /* ══ MODE TOGGLE ══ */
 .mode-sw{display:flex;align-items:center;gap:10px;padding:10px 8px 6px;
-  cursor:pointer;user-select:none;border-top:1px solid var(--bd);margin-top:6px}
+  cursor:pointer;user-select:none;border-top:1px solid var(--bd);margin-top:6px;
+  -webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .ms-track{width:40px;height:20px;border-radius:10px;background:var(--bd);
   position:relative;transition:background .25s;flex-shrink:0}
 .ms-track.new-mode{background:var(--pr)}
@@ -565,7 +567,7 @@ tr:last-child td{border-bottom:none}
 .ms-lbl{font-size:12px;color:var(--mu);transition:color .2s}
 .ms-lbl.new-mode{color:var(--pr);font-weight:700}
 .ms-tb{font-size:10px;padding:2px 7px;border-radius:10px;
-  background:rgba(0,198,169,.18);color:var(--pr);font-weight:700;display:none}
+  background:rgba(108,92,231,.1);color:var(--mu);font-weight:700}
 /* Buy guide */
 .buy-guide{list-style:none}
 .buy-item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--bd)}
@@ -709,7 +711,7 @@ tr:last-child td{border-bottom:none}
     <span class="tb-month" id="tb-month"></span>
   </div>
   <span class="tb-clock" id="tb-clock"></span>
-  <span class="ms-tb" id="tb-mode">신규</span>
+  <span class="ms-tb" id="tb-mode">기존</span>
   <div class="mode-sw" onclick="toggleMode()" style="border-top:none;margin-top:0;padding:0">
     <div class="ms-track" id="ms-track-m"><div class="ms-thumb"></div></div>
   </div>
@@ -1552,7 +1554,12 @@ function applyMode(){
   const trm=document.getElementById('ms-track-m');
   const tbm=document.getElementById('tb-mode');
   if(trm) trm.classList.toggle('new-mode',isNew);
-  if(tbm) tbm.style.display=isNew?'inline':'none';
+  if(tbm){
+    tbm.textContent=isNew?'신규':'기존';
+    tbm.style.background=isNew?'rgba(0,198,169,.18)':'rgba(108,92,231,.1)';
+    tbm.style.color=isNew?'var(--pr)':'var(--mu)';
+    tbm.style.display='inline';
+  }
   const ng=document.getElementById('new-user-guide-wrap');
   const eg=document.getElementById('existing-user-view-wrap');
   if(ng) ng.style.display=isNew?'block':'none';
