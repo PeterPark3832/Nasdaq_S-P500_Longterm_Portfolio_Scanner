@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
 
 log = logging.getLogger("dashboard")
