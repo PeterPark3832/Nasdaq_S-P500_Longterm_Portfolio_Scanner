@@ -9,7 +9,12 @@ import uvicorn
 
 log = logging.getLogger("dashboard")
 BASE  = Path(__file__).parent
-TOKEN = os.getenv("DASHBOARD_TOKEN", "scanner2024")
+
+# DASHBOARD_TOKENS: 쉼표 구분 다중 토큰 (우선). 없으면 DASHBOARD_TOKEN 단일값 사용.
+_raw_tokens = os.getenv("DASHBOARD_TOKENS") or os.getenv("DASHBOARD_TOKEN", "scanner2024")
+ALLOWED_TOKENS: set[str] = {t.strip() for t in _raw_tokens.split(",") if t.strip()}
+log.info(f"허용된 토큰 수: {len(ALLOWED_TOKENS)}개")
+
 app   = FastAPI(docs_url=None, redoc_url=None)
 
 _SEC_HEADERS = {
@@ -55,7 +60,7 @@ def _load(fname):
 
 @app.get("/api/data")
 def api_data(token: str = ""):
-    if token != TOKEN: raise HTTPException(401)
+    if token not in ALLOWED_TOKENS: raise HTTPException(401)
     return JSONResponse({
         "portfolio":   _load("portfolio_state_us.json") or {},
         "performance": _load("performance_history.json") or {"records": []},
@@ -82,7 +87,7 @@ def _validate_start(start: str) -> str:
 @app.get("/api/benchmark")
 def api_benchmark(token: str = "", start: str = ""):
     """SPY/QQQ 일별 누적 수익률 (포트폴리오 시작일 기준)."""
-    if token != TOKEN: raise HTTPException(401)
+    if token not in ALLOWED_TOKENS: raise HTTPException(401)
     start = _validate_start(start)
     try:
         import yfinance as yf
@@ -150,7 +155,7 @@ def api_benchmark(token: str = "", start: str = ""):
 
 @app.get("/api/logs")
 def api_logs(token: str = "", n: int = 300):
-    if token != TOKEN: raise HTTPException(401)
+    if token not in ALLOWED_TOKENS: raise HTTPException(401)
     n = max(1, min(n, 1000))  # 1~1000 클램핑 (OOM 방지)
     log_file = BASE / "longterm_scanner_us.log"
     try:
@@ -161,7 +166,7 @@ def api_logs(token: str = "", n: int = 300):
 
 @app.get("/api/changes")
 def api_changes(token: str = ""):
-    if token != TOKEN: raise HTTPException(401)
+    if token not in ALLOWED_TOKENS: raise HTTPException(401)
     return JSONResponse({
         "changes":      _load("rebalancing_changes.json") or {},
         "prev":         _load("portfolio_prev_us.json") or {},
@@ -171,7 +176,7 @@ def api_changes(token: str = ""):
 
 @app.get("/", response_class=HTMLResponse)
 def index(token: str = ""):
-    if token != TOKEN:
+    if token not in ALLOWED_TOKENS:
         return HTMLResponse("""<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>US Portfolio</title>
