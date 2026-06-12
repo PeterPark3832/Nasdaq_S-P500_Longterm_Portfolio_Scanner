@@ -1,14 +1,53 @@
-import os, json, logging, re
+import os, json, logging, re, time
+from collections import defaultdict
 from pathlib import Path
 from datetime import datetime, timedelta
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.base import BaseHTTPMiddleware
 import uvicorn
 
 log = logging.getLogger("dashboard")
 BASE  = Path(__file__).parent
 TOKEN = os.getenv("DASHBOARD_TOKEN", "scanner2024")
 app   = FastAPI(docs_url=None, redoc_url=None)
+
+_SEC_HEADERS = {
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+}
+
+# 슬라이딩 윈도우 레이트 리밋 (60초 / IP당 최대 요청 수)
+_RATE_WINDOW  = 60        # 초
+_RATE_LIMIT   = 60        # 기본 (API)
+_RATE_LIMIT_INDEX = 30    # / 엔드포인트 (브라우저 새로고침 고려)
+_rate_store: dict[str, list[float]] = defaultdict(list)
+
+def _check_rate(ip: str, limit: int) -> bool:
+    """True = 통과, False = 초과."""
+    now = time.monotonic()
+    hits = _rate_store[ip]
+    # 윈도우 밖 기록 제거
+    _rate_store[ip] = [t for t in hits if now - t < _RATE_WINDOW]
+    if len(_rate_store[ip]) >= limit:
+        return False
+    _rate_store[ip].append(now)
+    return True
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        ip = request.client.host if request.client else "unknown"
+        limit = _RATE_LIMIT_INDEX if request.url.path == "/" else _RATE_LIMIT
+        if not _check_rate(ip, limit):
+            log.warning(f"rate limit exceeded: {ip} {request.url.path}")
+            return Response("Too Many Requests", status_code=429)
+        response = await call_next(request)
+        response.headers.update(_SEC_HEADERS)
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 def _load(fname):
     try:    return json.loads((BASE / fname).read_text())
@@ -24,10 +63,27 @@ def api_data(token: str = ""):
         "updated":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
+_DATE_RE = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$")
+_DATE_MIN = datetime(2000, 1, 1)
+
+def _validate_start(start: str) -> str:
+    """YYYY-MM-DD 형식 검증 + 2000-01-01 ~ 오늘 범위 제한."""
+    if start and not _DATE_RE.match(start):
+        raise HTTPException(400, "start: YYYY-MM-DD 형식이어야 합니다")
+    if start:
+        try:
+            d = datetime.strptime(start, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(400, "start: 유효하지 않은 날짜입니다")
+        if d < _DATE_MIN or d > datetime.now():
+            raise HTTPException(400, "start: 2000-01-01 ~ 오늘 범위만 허용됩니다")
+    return start
+
 @app.get("/api/benchmark")
 def api_benchmark(token: str = "", start: str = ""):
     """SPY/QQQ 일별 누적 수익률 (포트폴리오 시작일 기준)."""
     if token != TOKEN: raise HTTPException(401)
+    start = _validate_start(start)
     try:
         import yfinance as yf
         import pandas as pd
@@ -90,16 +146,17 @@ def api_benchmark(token: str = "", start: str = ""):
 
     except Exception as e:
         log.warning(f"/api/benchmark error: {e}")
-        return JSONResponse({"spy": [], "qqq": [], "start_date": start, "updated": "", "error": str(e)})
+        return JSONResponse({"spy": [], "qqq": [], "start_date": start, "updated": "", "error": "데이터 조회 실패"})
 
 @app.get("/api/logs")
 def api_logs(token: str = "", n: int = 300):
     if token != TOKEN: raise HTTPException(401)
+    n = max(1, min(n, 1000))  # 1~1000 클램핑 (OOM 방지)
     log_file = BASE / "longterm_scanner_us.log"
     try:
         lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
         return JSONResponse({"lines": lines[-n:], "total": len(lines)})
-    except:
+    except Exception:
         return JSONResponse({"lines": [], "total": 0})
 
 @app.get("/api/changes")
@@ -128,7 +185,7 @@ body{background:#EEEEFF;color:#1a1a3e;font-family:system-ui,sans-serif;
 code{color:#6C5CE7;background:rgba(108,92,231,.1);padding:2px 8px;border-radius:4px;font-size:13px}
 </style></head><body><div class="c"><div class="lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
 <div class="t">접근 제한</div>
-<p style="color:#8892a5;font-size:14px;margin-top:8px">URL에 <code>?token=scanner2024</code> 추가</p>
+<p style="color:#8892a5;font-size:14px;margin-top:8px">올바른 접근 토큰이 필요합니다</p>
 </div></body></html>""")
     return HTMLResponse(
         MAIN.replace("__TOKEN__", token),
