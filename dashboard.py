@@ -658,7 +658,15 @@ tr:last-child td{border-bottom:none}
   transition:transform .2s;
 }
 #tour-help:hover{transform:scale(1.1)}
-@media(max-width:768px){#tour-card{width:calc(100vw - 32px);left:16px!important;right:16px!important}}
+@media(max-width:768px){
+  #tour-card{
+    width:calc(100vw - 32px)!important;
+    left:16px!important;right:auto!important;
+    bottom:82px!important;top:auto!important;  /* 모바일 하단 네비 위 */
+  }
+  #tour-card::before{display:none!important}  /* 화살표 숨김 */
+  #tour-help{bottom:82px!important}            /* ? 버튼도 네비 위로 */
+}
 
 </style>
 </head>
@@ -1597,7 +1605,7 @@ setInterval(load,300_000);
       icon:'{{ic:home}}',
       title:'환영합니다!',
       desc:'US Portfolio 대시보드입니다.\n포트폴리오 현황·리스크·리밸런싱 내역을\n한눈에 모니터링할 수 있어요.\n\n1분만 투자해 주요 기능을 살펴볼까요?'},
-    { sel:'.sidenav', nav:'home',
+    { sel:'.sidenav', msel:'.mnav', nav:'home',
       icon:'{{ic:roadmap}}',
       title:'탭 메뉴',
       desc:'사이드바에서 7개 섹션을 이동합니다.\n홈 · 포트폴리오 · 성과 분석\n리스크 · 변경 내역 · 로그 · 로드맵'},
@@ -1605,7 +1613,7 @@ setInterval(load,300_000);
       icon:'{{ic:trend}}',
       title:'홈 — 핵심 지표',
       desc:'포트폴리오 총 수익률과\nSPY·QQQ 대비 초과 성과(알파),\n현금 비중을 한눈에 확인합니다.'},
-    { sel:'.mode-sw', nav:'home',
+    { sel:'.mode-sw', msel:null, nav:'home',
       icon:'{{ic:changes}}',
       title:'신규 / 기존 유저 모드',
       desc:'처음 투자를 시작하거나 재진입한 경우\n"신규 유저 모드"로 전환하세요.\n비중 높은 순서로 매수 가이드를 제공합니다.'},
@@ -1672,38 +1680,44 @@ setInterval(load,300_000);
     });
   }
 
+  function isMobile(){ return window.innerWidth<=768; }
+
   function posCard(rect){
+    card.className='';
+
+    // 모바일: CSS !important 규칙(bottom:82px, left:16px)이 위치 처리
+    if(isMobile()){
+      card.style.left='';
+      card.style.top='';
+      card.classList.add('arr-none');
+      return;
+    }
+
     const cw=card.offsetWidth||290, ch=card.offsetHeight||220;
     const vw=window.innerWidth, vh=window.innerHeight;
     const gap=16;
-    card.className=''; // reset arrow class
 
     if(!rect){
-      // 중앙
       card.style.left=Math.round((vw-cw)/2)+'px';
       card.style.top=Math.round((vh-ch)/2)+'px';
       card.classList.add('arr-none');
       return;
     }
-    // 오른쪽 공간
     if(rect.right+cw+gap+20<vw){
       card.style.left=(rect.right+gap)+'px';
-      card.style.top=Math.max(10,Math.min(rect.top+rect.height/2-ch/2, vh-ch-10))+'px';
+      card.style.top=Math.max(10,Math.min(rect.top+rect.height/2-ch/2,vh-ch-10))+'px';
       card.classList.add('arr-left');
     } else if(rect.left-cw-gap>10){
-      // 왼쪽
       card.style.left=(rect.left-cw-gap)+'px';
-      card.style.top=Math.max(10,Math.min(rect.top+rect.height/2-ch/2, vh-ch-10))+'px';
+      card.style.top=Math.max(10,Math.min(rect.top+rect.height/2-ch/2,vh-ch-10))+'px';
       card.classList.add('arr-right');
     } else if(rect.top-ch-gap>10){
-      // 위
-      card.style.left=Math.max(10,Math.min(rect.left+rect.width/2-cw/2, vw-cw-10))+'px';
+      card.style.left=Math.max(10,Math.min(rect.left+rect.width/2-cw/2,vw-cw-10))+'px';
       card.style.top=(rect.top-ch-gap)+'px';
       card.classList.add('arr-bottom');
     } else {
-      // 아래
-      card.style.left=Math.max(10,Math.min(rect.left+rect.width/2-cw/2, vw-cw-10))+'px';
-      card.style.top=(rect.bottom+gap)+'px';
+      card.style.left=Math.max(10,Math.min(rect.left+rect.width/2-cw/2,vw-cw-10))+'px';
+      card.style.top=Math.min(rect.bottom+gap,vh-ch-10)+'px';
       card.classList.add('arr-top');
     }
   }
@@ -1722,18 +1736,16 @@ setInterval(load,300_000);
     btnNext.textContent=cur===STEPS.length-1?'완료':'다음';
     btnSkip.style.display=cur===STEPS.length-1?'none':'';
 
-    // 스포트라이트
-    const el=s.sel?document.querySelector(s.sel):null;
-    if(el){
-      const r=el.getBoundingClientRect();
+    // 스포트라이트 — 모바일에서 숨겨진 요소는 null 폴백
+    const selKey = isMobile() && 'msel' in s ? s.msel : s.sel;
+    const el = selKey ? document.querySelector(selKey) : null;
+    const r = el ? el.getBoundingClientRect() : null;
+    const useRect = (r && r.width>0 && r.height>0) ? r : null;
+
+    if(useRect){
       const pad=8;
-      spot.style.cssText=`
-        left:${r.left-pad}px;top:${r.top-pad}px;
-        width:${r.width+pad*2}px;height:${r.height+pad*2}px;
-        box-shadow:0 0 0 9999px rgba(15,12,41,.65);
-      `;
-      // 카드 위치: 한 프레임 뒤에 (높이 계산을 위해)
-      requestAnimationFrame(()=>posCard(r));
+      spot.style.cssText=`left:${useRect.left-pad}px;top:${useRect.top-pad}px;width:${useRect.width+pad*2}px;height:${useRect.height+pad*2}px;box-shadow:0 0 0 9999px rgba(15,12,41,.65);`;
+      requestAnimationFrame(()=>posCard(useRect));
     } else {
       spot.style.cssText='box-shadow:none;left:-999px;top:-999px;width:0;height:0';
       requestAnimationFrame(()=>posCard(null));
@@ -1759,7 +1771,7 @@ setInterval(load,300_000);
   };
   btnPrev.onclick=()=>{ if(cur>0) showStep(cur-1); };
   btnSkip.onclick=endTour;
-  document.getElementById('tour-bg').onclick=endTour;
+  document.getElementById('tour-bg').onclick=()=>{ if(!isMobile()) endTour(); };
 
   // 첫 방문 자동 실행
   if(!localStorage.getItem(KEY)){
