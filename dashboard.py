@@ -603,6 +603,63 @@ tr:last-child td{border-bottom:none}
 .rm-tag-plan{background:var(--accent-soft);color:var(--accent)}
 .rm-tag-idea{background:rgba(136,146,165,.12);color:var(--mu)}
 
+/* ══ ONBOARDING TOUR ══ */
+#tour-wrap{position:fixed;inset:0;z-index:10000;display:none}
+#tour-wrap.t-on{display:block}
+#tour-bg{position:fixed;inset:0;background:rgba(15,12,41,.65);transition:opacity .3s}
+#tour-spot{
+  position:fixed;border-radius:10px;
+  box-shadow:0 0 0 9999px rgba(15,12,41,.65);
+  transition:all .38s cubic-bezier(.4,0,.2,1);
+  pointer-events:none;z-index:10001;
+}
+#tour-card{
+  position:fixed;z-index:10002;
+  background:#fff;border-radius:18px;
+  box-shadow:0 12px 48px rgba(108,92,231,.22);
+  padding:26px 24px 20px;width:290px;
+  transition:all .38s cubic-bezier(.4,0,.2,1);
+}
+#tour-card::before{
+  content:'';position:absolute;
+  width:12px;height:12px;background:#fff;
+  transform:rotate(45deg);
+}
+#tour-card.arr-left::before{left:-5px;top:50%;margin-top:-6px}
+#tour-card.arr-right::before{right:-5px;top:50%;margin-top:-6px}
+#tour-card.arr-top::before{top:-5px;left:50%;margin-left:-6px}
+#tour-card.arr-bottom::before{bottom:-5px;left:50%;margin-left:-6px}
+#tour-card.arr-none::before{display:none}
+.t-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.t-ico{width:34px;height:34px;border-radius:10px;flex-shrink:0;
+  background:var(--accent-soft);color:var(--accent);
+  display:flex;align-items:center;justify-content:center}
+.t-title{font-size:15px;font-weight:800;color:var(--tx);line-height:1.2}
+.t-desc{font-size:13px;color:var(--mu);line-height:1.7;margin-bottom:18px;white-space:pre-line}
+.t-foot{display:flex;align-items:center;justify-content:space-between}
+.t-dots{display:flex;gap:5px;align-items:center}
+.t-dot{width:6px;height:6px;border-radius:50%;background:var(--bd);transition:all .25s}
+.t-dot.on{background:var(--accent);width:18px;border-radius:3px}
+.t-btns{display:flex;gap:6px}
+.t-btn{font-size:12px;font-weight:700;padding:7px 15px;
+  border-radius:9px;border:none;cursor:pointer;transition:opacity .15s}
+.t-skip{background:none;color:var(--mu)}
+.t-skip:hover{color:var(--tx)}
+.t-prev{background:var(--s2);color:var(--tx)}
+.t-next{background:var(--accent);color:#fff}
+.t-next:hover,.t-prev:hover{opacity:.88}
+#tour-help{
+  position:fixed;bottom:24px;right:24px;z-index:9000;
+  width:38px;height:38px;border-radius:50%;
+  background:var(--accent);color:#fff;border:none;
+  font-size:16px;font-weight:800;cursor:pointer;
+  box-shadow:0 4px 14px rgba(108,92,231,.4);
+  display:none;align-items:center;justify-content:center;
+  transition:transform .2s;
+}
+#tour-help:hover{transform:scale(1.1)}
+@media(max-width:768px){#tour-card{width:calc(100vw - 32px);left:16px!important;right:16px!important}}
+
 </style>
 </head>
 <body>
@@ -1531,6 +1588,187 @@ setInterval(()=>{
 
 load();
 setInterval(load,300_000);
+
+/* ── ONBOARDING TOUR ── */
+(function(){
+  const KEY='us_tour_v1';
+  const STEPS=[
+    { sel:null,
+      icon:'{{ic:home}}',
+      title:'환영합니다!',
+      desc:'US Portfolio 대시보드입니다.\n포트폴리오 현황·리스크·리밸런싱 내역을\n한눈에 모니터링할 수 있어요.\n\n1분만 투자해 주요 기능을 살펴볼까요?'},
+    { sel:'.sidenav', nav:'home',
+      icon:'{{ic:roadmap}}',
+      title:'탭 메뉴',
+      desc:'사이드바에서 7개 섹션을 이동합니다.\n홈 · 포트폴리오 · 성과 분석\n리스크 · 변경 내역 · 로그 · 로드맵'},
+    { sel:'#s-home .kpis', nav:'home',
+      icon:'{{ic:trend}}',
+      title:'홈 — 핵심 지표',
+      desc:'포트폴리오 총 수익률과\nSPY·QQQ 대비 초과 성과(알파),\n현금 비중을 한눈에 확인합니다.'},
+    { sel:'.mode-sw', nav:'home',
+      icon:'{{ic:changes}}',
+      title:'신규 / 기존 유저 모드',
+      desc:'처음 투자를 시작하거나 재진입한 경우\n"신규 유저 모드"로 전환하세요.\n비중 높은 순서로 매수 가이드를 제공합니다.'},
+    { sel:'#s-port', nav:'port',
+      icon:'{{ic:portfolio}}',
+      title:'포트폴리오',
+      desc:'섹터 배분 도넛 차트와 보유 종목 테이블.\n비중 · 스코어 · 진입가 · ROE · 마진율을\n한 화면에서 확인합니다.'},
+    { sel:'#s-risk .risk-grid', nav:'risk',
+      icon:'{{ic:risk}}',
+      title:'리스크 모니터링',
+      desc:'MDD 게이지로 현재 손실 수준 파악.\nVIX 레짐(정상/주의/공포)에 따라\n현금 비중이 자동 조정됩니다.'},
+    { sel:'#chg-new-wrap', nav:'changes',
+      icon:'{{ic:changes}}',
+      title:'변경 내역',
+      desc:'매월 리밸런싱 후 신규 편입 · 편출\n비중 확대 · 축소 종목을 카드로 확인합니다.'},
+    { sel:null,
+      icon:'{{ic:check}}',
+      title:'준비 완료!',
+      desc:'이제 자유롭게 탐색해보세요.\n화면 우하단 ? 버튼으로\n언제든 가이드를 다시 볼 수 있습니다.'},
+  ];
+
+  let cur=0;
+  const wrap=document.createElement('div'); wrap.id='tour-wrap';
+  wrap.innerHTML=`
+    <div id="tour-bg"></div>
+    <div id="tour-spot"></div>
+    <div id="tour-card">
+      <div class="t-head">
+        <div class="t-ico" id="t-ico"></div>
+        <div class="t-title" id="t-title"></div>
+      </div>
+      <div class="t-desc" id="t-desc"></div>
+      <div class="t-foot">
+        <div class="t-dots" id="t-dots"></div>
+        <div class="t-btns">
+          <button class="t-btn t-skip" id="t-skip">건너뛰기</button>
+          <button class="t-btn t-prev" id="t-prev" style="display:none">이전</button>
+          <button class="t-btn t-next" id="t-next">다음</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  const helpBtn=document.createElement('button');
+  helpBtn.id='tour-help'; helpBtn.textContent='?';
+  helpBtn.title='가이드 다시 보기';
+  helpBtn.style.display='flex';
+  helpBtn.onclick=()=>startTour();
+  document.body.appendChild(helpBtn);
+
+  const spot=document.getElementById('tour-spot');
+  const card=document.getElementById('tour-card');
+  const dots=document.getElementById('t-dots');
+  const btnSkip=document.getElementById('t-skip');
+  const btnPrev=document.getElementById('t-prev');
+  const btnNext=document.getElementById('t-next');
+
+  function buildDots(){
+    dots.innerHTML='';
+    STEPS.forEach((_,i)=>{
+      const d=document.createElement('div');
+      d.className='t-dot'+(i===cur?' on':'');
+      dots.appendChild(d);
+    });
+  }
+
+  function posCard(rect){
+    const cw=card.offsetWidth||290, ch=card.offsetHeight||220;
+    const vw=window.innerWidth, vh=window.innerHeight;
+    const gap=16;
+    card.className=''; // reset arrow class
+
+    if(!rect){
+      // 중앙
+      card.style.left=Math.round((vw-cw)/2)+'px';
+      card.style.top=Math.round((vh-ch)/2)+'px';
+      card.classList.add('arr-none');
+      return;
+    }
+    // 오른쪽 공간
+    if(rect.right+cw+gap+20<vw){
+      card.style.left=(rect.right+gap)+'px';
+      card.style.top=Math.max(10,Math.min(rect.top+rect.height/2-ch/2, vh-ch-10))+'px';
+      card.classList.add('arr-left');
+    } else if(rect.left-cw-gap>10){
+      // 왼쪽
+      card.style.left=(rect.left-cw-gap)+'px';
+      card.style.top=Math.max(10,Math.min(rect.top+rect.height/2-ch/2, vh-ch-10))+'px';
+      card.classList.add('arr-right');
+    } else if(rect.top-ch-gap>10){
+      // 위
+      card.style.left=Math.max(10,Math.min(rect.left+rect.width/2-cw/2, vw-cw-10))+'px';
+      card.style.top=(rect.top-ch-gap)+'px';
+      card.classList.add('arr-bottom');
+    } else {
+      // 아래
+      card.style.left=Math.max(10,Math.min(rect.left+rect.width/2-cw/2, vw-cw-10))+'px';
+      card.style.top=(rect.bottom+gap)+'px';
+      card.classList.add('arr-top');
+    }
+  }
+
+  function showStep(idx){
+    cur=idx;
+    const s=STEPS[cur];
+    // 탭 이동
+    if(s.nav && window.go) go(s.nav);
+
+    document.getElementById('t-ico').innerHTML=s.icon;
+    document.getElementById('t-title').textContent=s.title;
+    document.getElementById('t-desc').textContent=s.desc;
+    buildDots();
+    btnPrev.style.display=cur>0?'':'none';
+    btnNext.textContent=cur===STEPS.length-1?'완료':'다음';
+    btnSkip.style.display=cur===STEPS.length-1?'none':'';
+
+    // 스포트라이트
+    const el=s.sel?document.querySelector(s.sel):null;
+    if(el){
+      const r=el.getBoundingClientRect();
+      const pad=8;
+      spot.style.cssText=`
+        left:${r.left-pad}px;top:${r.top-pad}px;
+        width:${r.width+pad*2}px;height:${r.height+pad*2}px;
+        box-shadow:0 0 0 9999px rgba(15,12,41,.65);
+      `;
+      // 카드 위치: 한 프레임 뒤에 (높이 계산을 위해)
+      requestAnimationFrame(()=>posCard(r));
+    } else {
+      spot.style.cssText='box-shadow:none;left:-999px;top:-999px;width:0;height:0';
+      requestAnimationFrame(()=>posCard(null));
+    }
+  }
+
+  function endTour(){
+    wrap.classList.remove('t-on');
+    helpBtn.style.display='flex';
+    localStorage.setItem(KEY,'1');
+  }
+
+  function startTour(){
+    helpBtn.style.display='none';
+    wrap.classList.add('t-on');
+    cur=0;
+    showStep(0);
+  }
+
+  btnNext.onclick=()=>{
+    if(cur===STEPS.length-1){ endTour(); return; }
+    showStep(cur+1);
+  };
+  btnPrev.onclick=()=>{ if(cur>0) showStep(cur-1); };
+  btnSkip.onclick=endTour;
+  document.getElementById('tour-bg').onclick=endTour;
+
+  // 첫 방문 자동 실행
+  if(!localStorage.getItem(KEY)){
+    setTimeout(startTour, 800);
+  } else {
+    helpBtn.style.display='flex';
+  }
+})();
+
 </script>
 </body>
 </html>
