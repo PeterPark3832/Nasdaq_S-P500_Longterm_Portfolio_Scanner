@@ -68,6 +68,51 @@ def api_data(token: str = ""):
         "updated":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     })
 
+# 현재가 캐시 ('오늘 시작 가이드' 주식수 계산용) — 15분
+_PRICE_CACHE: dict = {"ts": 0.0, "prices": {}, "asof": ""}
+_PRICE_TTL = 900
+
+@app.get("/api/prices")
+def api_prices(token: str = ""):
+    """보유 종목의 최근 종가. 오늘 기준 주식수 계산에 사용. 15분 인메모리 캐시."""
+    if token not in ALLOWED_TOKENS: raise HTTPException(401)
+    now = time.monotonic()
+    if _PRICE_CACHE["prices"] and now - _PRICE_CACHE["ts"] < _PRICE_TTL:
+        return JSONResponse({"prices": _PRICE_CACHE["prices"], "asof": _PRICE_CACHE["asof"], "cached": True})
+
+    port = _load("portfolio_state_us.json") or {}
+    tickers = [h["ticker"] for h in port.get("holdings", [])
+               if h.get("ticker") and h["ticker"] != "CASH"]
+    if not tickers:
+        return JSONResponse({"prices": {}, "asof": "", "error": "no_holdings"})
+    try:
+        import yfinance as yf
+        import pandas as pd
+        start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        end   = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        raw = yf.download(tickers, start=start, end=end, progress=False, auto_adjust=True)
+        prices, asof = {}, ""
+        if raw is None or raw.empty:
+            return JSONResponse({"prices": {}, "asof": "", "error": "no_data"})
+        if isinstance(raw.columns, pd.MultiIndex):
+            cl = raw["Close"]
+            for t in tickers:
+                if t in cl.columns:
+                    s = cl[t].dropna()
+                    if not s.empty:
+                        prices[t] = round(float(s.iloc[-1]), 2)
+                        asof = str(s.index[-1].date())
+        else:  # 단일 종목
+            s = raw["Close"].dropna()
+            if not s.empty:
+                prices[tickers[0]] = round(float(s.iloc[-1]), 2)
+                asof = str(s.index[-1].date())
+        _PRICE_CACHE.update(ts=now, prices=prices, asof=asof)
+        return JSONResponse({"prices": prices, "asof": asof, "cached": False})
+    except Exception as e:
+        log.warning(f"api/prices error: {e}")
+        return JSONResponse({"prices": {}, "asof": "", "error": "가격 조회 실패"})
+
 _DATE_RE = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$")
 _DATE_MIN = datetime(2000, 1, 1)
 
@@ -899,8 +944,8 @@ tr:last-child td{border-bottom:none}
         <div id="buy-cash-info" style="margin-top:12px;padding:10px 14px;
           background:var(--s2);border-radius:8px;font-size:13px;font-weight:600;color:var(--mu)"></div>
         <p style="font-size:11px;color:var(--mu);margin-top:10px;line-height:1.6">
-          ※ 진입가는 최근 리밸런싱 기준 종가 — 실제 체결가는 다를 수 있습니다<br>
-          ※ 주식수는 기준가로 계산한 참고값 (소수점 버림)<br>
+          <span id="price-note"></span>
+          ※ 주식수는 현재가 기준 참고값 (소수점 버림) — 실제 체결가는 다를 수 있습니다<br>
           ※ CASH는 달러 예수금 또는 MMF로 보유하세요
         </p>
       </div>
@@ -1055,6 +1100,7 @@ const SCOL={
 };
 let D=null,BM=null,CHS={},RANGE={home:'ALL',perf:'ALL'};
 let USER_MODE=localStorage.getItem('userMode')||'existing';
+let LIVE_PRICES={},PRICE_ASOF='',_pricesLoaded=false;
 
 Chart.defaults.color='#8892a5';
 Chart.defaults.borderColor='rgba(108,92,231,.07)';
@@ -1629,7 +1675,10 @@ function applyMode(){
   const eg=document.getElementById('existing-user-view-wrap');
   if(ng) ng.style.display=isNew?'block':'none';
   if(eg) eg.style.display=isNew?'none':'block';
-  if(isNew&&D) renderNewUserGuide();
+  if(isNew&&D){
+    renderNewUserGuide();
+    if(!_pricesLoaded) loadPrices();  // 신규 모드 진입 시 현재가 1회 로드
+  }
 }
 
 function toggleMode(){
@@ -1670,14 +1719,16 @@ function renderNewUserGuide(){
   const el=document.getElementById('buy-guide-list');
   if(el) el.innerHTML=stocks.map((h,i)=>{
     let right;
+    const live=LIVE_PRICES[h.ticker]>0;
+    const px=live?LIVE_PRICES[h.ticker]:(h.entry_price||0);  // 현재가 우선, 없으면 진입가 폴백
     if(cap>0){
       const amt=cap*h.weight/100;
-      const sh=h.entry_price>0?Math.floor(amt/h.entry_price):0;
+      const sh=px>0?Math.floor(amt/px):0;
       right=`<div class="buy-amt">${fm0(amt)}</div>
-        <div class="buy-shares">${h.weight.toFixed(1)}% · 약 ${sh}주</div>`;
+        <div class="buy-shares">${h.weight.toFixed(1)}% · 약 ${sh}주 @ ${fm(px)}</div>`;
     }else{
       right=`<div class="buy-weight">${h.weight.toFixed(1)}%</div>
-        <div class="buy-price">기준가 ${fm(h.entry_price)}</div>`;
+        <div class="buy-price">${live?'현재가':'기준가'} ${fm(px)}</div>`;
     }
     return `<li class="buy-item">
       <div class="buy-num">${i+1}</div>
@@ -1693,6 +1744,14 @@ function renderNewUserGuide(){
   if(ci) ci.textContent=cap>0
     ? `💵 현금 ${cw.toFixed(0)}% (${fm0(cap*cw/100)}) — 달러 예수금/MMF로 확보`
     : `💵 현금 (달러 예수금/MMF): ${cw.toFixed(0)}%`;
+
+  // 현재가 기준일 안내
+  const pn=document.getElementById('price-note');
+  if(pn) pn.innerHTML=_pricesLoaded&&PRICE_ASOF
+    ? `※ 현재가 기준일: ${PRICE_ASOF} (장중엔 직전 종가, 15분 캐시)<br>`
+    : (_pricesLoaded
+        ? `※ 현재가를 불러오지 못해 진입가(리밸런싱 종가)로 계산했습니다<br>`
+        : `※ 현재가 불러오는 중… (잠시 후 자동 갱신)<br>`);
 
   // 실행 체크리스트
   const chk=document.getElementById('entry-checklist');
@@ -1711,6 +1770,21 @@ function renderNewUserGuide(){
 function setCap(v){
   const el=document.getElementById('cap-amt');
   if(el){ el.value=v; renderNewUserGuide(); }
+}
+
+async function loadPrices(){
+  try{
+    const r=await fetch('/api/prices?token='+TK);
+    if(!r.ok) throw new Error();
+    const d=await r.json();
+    LIVE_PRICES=d.prices||{};
+    PRICE_ASOF=d.asof||'';
+    _pricesLoaded=true;
+    if(USER_MODE==='new') renderNewUserGuide();  // 현재가 반영 재렌더
+  }catch{
+    _pricesLoaded=true;  // 실패해도 진입가 폴백으로 안내 갱신
+    if(USER_MODE==='new') renderNewUserGuide();
+  }
 }
 
 // 시계
