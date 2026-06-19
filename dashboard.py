@@ -214,6 +214,7 @@ MAIN = r"""<!DOCTYPE html>
   --sidebar-active:rgba(108,92,231,.3);
   --card:#fff;
   --card-bg2:#F5F4FF;
+  --s2:#F5F4FF;
   --accent:#6C5CE7;
   --accent2:#4834D4;
   --accent-soft:rgba(108,92,231,.1);
@@ -585,6 +586,40 @@ tr:last-child td{border-bottom:none}
 .mode-notice{display:flex;align-items:center;gap:8px;padding:10px 14px;
   border-radius:8px;margin-bottom:16px;font-size:13px;font-weight:600;
   background:rgba(0,198,169,.09);border:1px solid rgba(0,198,169,.2);color:var(--pr)}
+/* 오늘 시작 가이드 — 진입 판정 */
+.entry-verdict{display:flex;align-items:center;gap:12px;padding:14px 16px;
+  border-radius:var(--r-sm);margin-bottom:10px}
+.entry-verdict.v-normal{background:var(--gn-s);border:1px solid rgba(0,184,148,.25)}
+.entry-verdict.v-caution{background:var(--yw-s);border:1px solid rgba(184,134,11,.25)}
+.entry-verdict.v-fear{background:var(--rd-s);border:1px solid rgba(225,112,85,.3)}
+.ev-badge{font-size:22px;line-height:1;flex-shrink:0}
+.ev-body{flex:1;min-width:0}
+.ev-title{font-size:15px;font-weight:800;margin-bottom:2px}
+.ev-desc{font-size:12px;color:var(--mu);line-height:1.5}
+.entry-plan{font-size:12px;font-weight:600;color:var(--tx);padding:10px 14px;
+  background:var(--s2);border-radius:8px;display:flex;align-items:center;gap:8px}
+/* 투자금 입력 */
+.cap-input{margin-bottom:14px}
+.cap-row{display:flex;align-items:center;gap:8px;border:1.5px solid var(--bd);
+  border-radius:10px;padding:0 12px;background:#fafaff}
+.cap-row:focus-within{border-color:var(--accent)}
+.cap-prefix{font-size:15px;font-weight:700;color:var(--mu)}
+.cap-row input{border:none;background:transparent;padding:11px 0;
+  font-size:15px;font-weight:600;width:100%}
+.cap-row input:focus{outline:none}
+.cap-chips{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.cap-chip{padding:5px 12px;border-radius:16px;border:1px solid var(--bd);
+  background:transparent;color:var(--mu);font-size:12px;font-weight:600}
+.cap-chip:hover{border-color:var(--accent);color:var(--accent)}
+/* 매수 항목 금액 */
+.buy-amt{font-size:14px;font-weight:800;color:var(--pr)}
+.buy-shares{font-size:11px;color:var(--mu);margin-top:1px}
+/* 체크리스트 */
+.chk-list{list-style:none;display:flex;flex-direction:column;gap:11px}
+.chk-item{display:flex;gap:10px;font-size:13px;line-height:1.5;color:var(--tx)}
+.chk-num{width:22px;height:22px;border-radius:50%;background:var(--accent-soft);
+  color:var(--accent);font-size:11px;font-weight:800;display:flex;
+  align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
 /* ══ ROADMAP ══ */
 .rm-section{margin-bottom:28px}
 .rm-title{font-size:11px;font-weight:700;color:var(--mu);text-transform:uppercase;
@@ -834,17 +869,46 @@ tr:last-child td{border-bottom:none}
 
     <!-- ── 신규 유저 모드 ── -->
     <div id="new-user-guide-wrap" style="display:none">
-      <div class="mode-notice">🟢 신규 유저 모드 — 현재 포트폴리오 전종목 신규 매수 가이드</div>
+      <div class="mode-notice">🟢 신규 유저 모드 — 오늘 기준으로 시작한다면?</div>
+
+      <!-- 진입 환경 판정 -->
       <div class="card mb16">
-        <div class="ctitle">매수 순서 (비중 높은 순)</div>
+        <div class="ctitle">진입 환경 판정</div>
+        <div class="entry-verdict" id="entry-verdict"></div>
+        <div class="entry-plan" id="entry-plan"></div>
+      </div>
+
+      <!-- 투자금 입력 → 종목별 배분 -->
+      <div class="card mb16">
+        <div class="ctitle">매수 가이드 (비중 높은 순)</div>
+        <div class="cap-input">
+          <label for="cap-amt">투자 가능 금액 (USD)</label>
+          <div class="cap-row">
+            <span class="cap-prefix">$</span>
+            <input type="number" id="cap-amt" inputmode="numeric" placeholder="예: 10000"
+              min="0" step="100" oninput="renderNewUserGuide()">
+          </div>
+          <div class="cap-chips">
+            <button type="button" class="cap-chip" onclick="setCap(5000)">$5K</button>
+            <button type="button" class="cap-chip" onclick="setCap(10000)">$10K</button>
+            <button type="button" class="cap-chip" onclick="setCap(30000)">$30K</button>
+            <button type="button" class="cap-chip" onclick="setCap(50000)">$50K</button>
+          </div>
+        </div>
         <ul class="buy-guide" id="buy-guide-list"></ul>
         <div id="buy-cash-info" style="margin-top:12px;padding:10px 14px;
           background:var(--s2);border-radius:8px;font-size:13px;font-weight:600;color:var(--mu)"></div>
         <p style="font-size:11px;color:var(--mu);margin-top:10px;line-height:1.6">
-          ※ 진입가는 최근 리밸런싱 기준 종가입니다<br>
-          ※ CASH는 달러 예수금 또는 MMF로 보유하세요<br>
-          ※ 매도 순서 없이 전부 신규 매수 — 비중 높은 순서 권장
+          ※ 진입가는 최근 리밸런싱 기준 종가 — 실제 체결가는 다를 수 있습니다<br>
+          ※ 주식수는 기준가로 계산한 참고값 (소수점 버림)<br>
+          ※ CASH는 달러 예수금 또는 MMF로 보유하세요
         </p>
+      </div>
+
+      <!-- 실행 체크리스트 -->
+      <div class="card mb16">
+        <div class="ctitle">실행 체크리스트</div>
+        <ul class="chk-list" id="entry-checklist"></ul>
       </div>
     </div>
 
@@ -997,6 +1061,7 @@ Chart.defaults.borderColor='rgba(108,92,231,.07)';
 
 const fp=(v,s=true)=>v==null||isNaN(v)?'—':(s&&v>0?'+':'')+v.toFixed(2)+'%';
 const fm=v=>v==null?'—':'$'+v.toFixed(2);
+const fm0=v=>v==null||isNaN(v)?'—':'$'+Math.round(v).toLocaleString('en-US');
 const fc=v=>v>0?'pos':v<0?'neg':'';
 
 function go(name){
@@ -1575,24 +1640,77 @@ function toggleMode(){
 
 function renderNewUserGuide(){
   if(!D) return;
-  const stocks=(D.portfolio.holdings||[]).filter(h=>h.ticker!=='CASH')
-    .sort((a,b)=>b.weight-a.weight);
+  const holdings=D.portfolio.holdings||[];
+  const stocks=holdings.filter(h=>h.ticker!=='CASH').sort((a,b)=>b.weight-a.weight);
+  const cash=holdings.find(h=>h.ticker==='CASH');
+  const cw=cash?cash.weight:0;
+
+  // 진입 환경 판정 — 현금 비중에 VIX 레짐 인코딩(30 정상 / 50 주의 / 60 공포)
+  let reg;
+  if(cw>55)       reg={cls:'v-fear',   badge:'🔴',title:'방어적 분할 진입',
+    desc:'고변동성 구간입니다. 한 번에 넣지 말고 분할 매수하며 현금 비중을 넉넉히 유지하세요.',
+    plan:'4~6주에 걸쳐 3~4회 분할 매수 권장',splits:4};
+  else if(cw>=40) reg={cls:'v-caution',badge:'🟡',title:'신중한 분할 진입',
+    desc:'변동성이 올라온 구간입니다. 2~3회로 나눠 진입해 평균 단가 위험을 낮추세요.',
+    plan:'3~4주에 걸쳐 2~3회 분할 매수 권장',splits:3};
+  else            reg={cls:'v-normal', badge:'🟢',title:'신규 진입 양호',
+    desc:'변동성이 안정적입니다. 목표 비중대로 매수해도 무방합니다.',
+    plan:'1회 일괄 또는 2주에 걸쳐 2회 분할',splits:2};
+
+  const ev=document.getElementById('entry-verdict');
+  if(ev){ ev.className='entry-verdict '+reg.cls;
+    ev.innerHTML=`<div class="ev-badge">${reg.badge}</div>
+      <div class="ev-body"><div class="ev-title">${reg.title}</div>
+      <div class="ev-desc">${reg.desc}</div></div>`; }
+  const ep=document.getElementById('entry-plan');
+  if(ep) ep.innerHTML=`📅 ${reg.plan}`;
+
+  // 투자금 입력 → 종목별 금액·주식수 배분
+  const cap=parseFloat(document.getElementById('cap-amt')?.value)||0;
   const el=document.getElementById('buy-guide-list');
-  if(el) el.innerHTML=stocks.map((h,i)=>`
-    <li class="buy-item">
+  if(el) el.innerHTML=stocks.map((h,i)=>{
+    let right;
+    if(cap>0){
+      const amt=cap*h.weight/100;
+      const sh=h.entry_price>0?Math.floor(amt/h.entry_price):0;
+      right=`<div class="buy-amt">${fm0(amt)}</div>
+        <div class="buy-shares">${h.weight.toFixed(1)}% · 약 ${sh}주</div>`;
+    }else{
+      right=`<div class="buy-weight">${h.weight.toFixed(1)}%</div>
+        <div class="buy-price">기준가 ${fm(h.entry_price)}</div>`;
+    }
+    return `<li class="buy-item">
       <div class="buy-num">${i+1}</div>
       <div class="buy-info">
         <div class="buy-ticker">${h.ticker}</div>
         <div class="buy-name">${h.name}</div>
       </div>
-      <div class="buy-right">
-        <div class="buy-weight">${h.weight.toFixed(1)}%</div>
-        <div class="buy-price">기준가 ${fm(h.entry_price)}</div>
-      </div>
-    </li>`).join('');
-  const cash=(D.portfolio.holdings||[]).find(h=>h.ticker==='CASH');
+      <div class="buy-right">${right}</div>
+    </li>`;}).join('');
+
+  // 현금 안내
   const ci=document.getElementById('buy-cash-info');
-  if(ci&&cash) ci.textContent=`💵 현금 (달러 예수금/MMF): ${cash.weight.toFixed(0)}%`;
+  if(ci) ci.textContent=cap>0
+    ? `💵 현금 ${cw.toFixed(0)}% (${fm0(cap*cw/100)}) — 달러 예수금/MMF로 확보`
+    : `💵 현금 (달러 예수금/MMF): ${cw.toFixed(0)}%`;
+
+  // 실행 체크리스트
+  const chk=document.getElementById('entry-checklist');
+  if(chk){
+    const steps=[
+      '투자 가능 금액을 확정하세요 — 생활비·비상금을 제외한 여유 자금만 사용합니다.',
+      `현금 비중 ${cw.toFixed(0)}%는 달러 예수금 또는 MMF로 확보합니다.`,
+      `나머지를 위 비중대로 ${reg.splits}회에 나눠, 비중 높은 종목부터 매수합니다.`,
+      '매월 리밸런싱일에 「변경 내역」 탭을 확인하고 비중 차이만 조정합니다.',
+    ];
+    chk.innerHTML=steps.map((s,i)=>`<li class="chk-item">
+      <div class="chk-num">${i+1}</div><div>${s}</div></li>`).join('');
+  }
+}
+
+function setCap(v){
+  const el=document.getElementById('cap-amt');
+  if(el){ el.value=v; renderNewUserGuide(); }
 }
 
 // 시계
