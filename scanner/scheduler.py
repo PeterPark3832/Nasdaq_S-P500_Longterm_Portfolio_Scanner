@@ -9,7 +9,7 @@ from datetime import datetime
 import schedule
 
 from scanner.config import STRATEGY, KST
-from scanner.portfolio import load_portfolio, already_ran_this_month
+from scanner.portfolio import load_portfolio, already_ran_this_month, compute_current_values
 from scanner.telegram_io import send_telegram, reply_to, reply_to_chunks, get_updates
 from scanner.performance import get_quick_portfolio_return, build_performance_brief, job_performance_check
 from scanner.alerts import job_heartbeat, check_and_alert_mdd
@@ -38,18 +38,11 @@ def _cmd_status(chat_id: str) -> None:
     month     = portfolio.get("month", "?")
 
     stock_holdings = [h for h in portfolio["holdings"] if h["ticker"] != "CASH"]
-    cash_holdings  = [h for h in portfolio["holdings"] if h["ticker"] == "CASH"]
 
     tickers   = [h["ticker"] for h in stock_holdings]
     price_map = fetch_current_prices(tickers) if tickers else {}
 
-    cash_val = sum(h["weight"] for h in cash_holdings)
-    stock_vals: dict[str, float] = {}
-    for h in stock_holdings:
-        cur  = price_map.get(h["ticker"], h["entry_price"])
-        mult = (cur / h["entry_price"]) if h["entry_price"] > 0 else 1.0
-        stock_vals[h["ticker"]] = h["weight"] * mult
-    total_val = cash_val + sum(stock_vals.values())
+    _, stock_vals, total_val = compute_current_values(portfolio["holdings"], price_map)
 
     lines = [
         f"📊 *포트폴리오 현황* ({datetime.now(KST).strftime('%Y-%m-%d %H:%M')})",

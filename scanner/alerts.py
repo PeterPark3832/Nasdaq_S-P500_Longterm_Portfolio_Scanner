@@ -6,7 +6,9 @@ import threading
 from datetime import datetime
 
 from scanner.config import STRATEGY, KST
-from scanner.portfolio import load_portfolio, save_portfolio, already_ran_this_month
+from scanner.portfolio import (
+    load_portfolio, save_portfolio, already_ran_this_month, compute_current_values,
+)
 from scanner.telegram_io import send_telegram
 
 log = logging.getLogger("scanner")
@@ -67,14 +69,7 @@ def check_and_alert_drift(portfolio: dict) -> list[dict]:
     if not price_map:
         return []
 
-    cash_val = sum(h["weight"] for h in cash_holdings)
-    stock_vals: dict[str, float] = {}
-    for h in stock_holdings:
-        cur  = price_map.get(h["ticker"], h["entry_price"])
-        mult = (cur / h["entry_price"]) if h["entry_price"] > 0 else 1.0
-        stock_vals[h["ticker"]] = h["weight"] * mult
-
-    total_val = cash_val + sum(stock_vals.values())
+    cash_val, stock_vals, total_val = compute_current_values(portfolio["holdings"], price_map)
     if total_val <= 0:
         return []
 

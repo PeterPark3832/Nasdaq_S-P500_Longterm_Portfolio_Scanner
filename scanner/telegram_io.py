@@ -15,6 +15,21 @@ def _is_supergroup(chat_id: str) -> bool:
     return str(chat_id).startswith("-100")
 
 
+def _split_into_chunks(text: str, limit: int = 3800) -> list[str]:
+    """긴 텍스트를 줄 단위로 잘라 limit 이하 청크 리스트로 반환."""
+    chunks, current = [], ""
+    for line in text.split("\n"):
+        if len(current) + len(line) + 1 > limit:
+            if current.strip():
+                chunks.append(current.strip())
+            current = line + "\n"
+        else:
+            current += line + "\n"
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks
+
+
 def send_telegram(text: str, topic_id: int | None = None) -> None:
     """모든 TELEGRAM_CHAT_IDS에 브로드캐스트."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_IDS:
@@ -42,16 +57,10 @@ def send_telegram_chunks(text: str, topic_id: int | None = None) -> None:
     if len(text) <= 4000:
         send_telegram(text, topic_id=topic_id)
         return
-    lines, current = text.split("\n"), ""
-    for line in lines:
-        if len(current) + len(line) + 1 > 3800:
-            send_telegram(current.strip(), topic_id=topic_id)
+    for i, chunk in enumerate(_split_into_chunks(text)):
+        if i > 0:
             time.sleep(0.5)
-            current = line + "\n"
-        else:
-            current += line + "\n"
-    if current.strip():
-        send_telegram(current.strip(), topic_id=topic_id)
+        send_telegram(chunk, topic_id=topic_id)
 
 
 def reply_to(chat_id: str, text: str) -> None:
@@ -76,16 +85,10 @@ def reply_to_chunks(chat_id: str, text: str) -> None:
     if len(text) <= 4000:
         reply_to(chat_id, text)
         return
-    lines, current = text.split("\n"), ""
-    for line in lines:
-        if len(current) + len(line) + 1 > 3800:
-            reply_to(chat_id, current.strip())
+    for i, chunk in enumerate(_split_into_chunks(text)):
+        if i > 0:
             time.sleep(0.5)
-            current = line + "\n"
-        else:
-            current += line + "\n"
-    if current.strip():
-        reply_to(chat_id, current.strip())
+        reply_to(chat_id, chunk)
 
 
 def get_updates(offset: int, timeout: int = 30) -> list[dict]:

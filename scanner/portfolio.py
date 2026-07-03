@@ -67,6 +67,26 @@ def is_fresh_start(portfolio: dict | None) -> bool:
     return not any(h["ticker"] != "CASH" for h in portfolio["holdings"])
 
 
+def compute_current_values(
+    holdings: list[dict], price_map: dict[str, float]
+) -> tuple[float, dict[str, float], float]:
+    """현재가 기준 평가금액 계산 (진입 시점 비중=원금 기준 상대 평가).
+
+    반환: (현금 평가액, {티커: 주식 평가액}, 총 평가액)
+    가격 조회 실패 종목은 진입가로 대체 → 평가 배수 1.0.
+    """
+    cash_val = sum(h["weight"] for h in holdings if h["ticker"] == "CASH")
+    stock_vals: dict[str, float] = {}
+    for h in holdings:
+        if h["ticker"] == "CASH":
+            continue
+        cur  = price_map.get(h["ticker"], h["entry_price"])
+        mult = (cur / h["entry_price"]) if h["entry_price"] > 0 else 1.0
+        stock_vals[h["ticker"]] = h["weight"] * mult
+    total_val = cash_val + sum(stock_vals.values())
+    return cash_val, stock_vals, total_val
+
+
 # ── 리밸런싱 브리핑 ────────────────────────────────────────────────
 
 def build_rebalancing_brief(
