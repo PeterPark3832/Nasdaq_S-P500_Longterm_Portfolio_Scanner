@@ -1,6 +1,7 @@
 """
 yfinance 재무 캐시, 벌크 가격 다운로드, VIX
 """
+import json
 import logging
 import threading
 import time
@@ -25,9 +26,7 @@ def load_info_cache() -> None:
     if not INFO_CACHE_FILE.exists():
         return
     try:
-        data = INFO_CACHE_FILE.read_text(encoding="utf-8")
-        import json
-        data = __import__("json").loads(data)
+        data = json.loads(INFO_CACHE_FILE.read_text(encoding="utf-8"))
         now = datetime.now(KST)
         now_month = now.strftime("%Y-%m")
         if data.get("month") != now_month:
@@ -49,7 +48,6 @@ def load_info_cache() -> None:
 
 
 def save_info_cache() -> None:
-    import json
     now = datetime.now(KST)
     with _info_cache_lock:
         INFO_CACHE_FILE.write_text(

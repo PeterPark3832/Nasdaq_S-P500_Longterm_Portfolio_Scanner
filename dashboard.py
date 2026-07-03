@@ -72,6 +72,11 @@ def api_data(token: str = ""):
 _PRICE_CACHE: dict = {"ts": 0.0, "prices": {}, "asof": ""}
 _PRICE_TTL = 900
 
+# 벤치마크 캐시 (SPY/QQQ 일별 누적) — start 날짜별 30분
+# 일봉 데이터라 장중 불변 → 대시보드 5분 자동 새로고침마다 재다운로드 방지
+_BENCH_CACHE: dict = {}   # {start: (monotonic_ts, payload)}
+_BENCH_TTL = 1800
+
 @app.get("/api/prices")
 def api_prices(token: str = ""):
     """보유 종목의 최근 종가. 오늘 기준 주식수 계산에 사용. 15분 인메모리 캐시."""
@@ -149,6 +154,14 @@ def api_benchmark(token: str = "", start: str = ""):
                 start = f"{month}-01" if month else (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
 
         end = datetime.now().strftime("%Y-%m-%d")
+
+        # TTL 캐시 조회 (resolved start 기준)
+        now_ts = time.monotonic()
+        cached = _BENCH_CACHE.get(start)
+        if cached and now_ts - cached[0] < _BENCH_TTL:
+            payload = {**cached[1], "cached": True}
+            return JSONResponse(payload)
+
         raw = yf.download(
             ["SPY", "QQQ"], start=start, end=end,
             progress=False, auto_adjust=True,
@@ -187,12 +200,18 @@ def api_benchmark(token: str = "", start: str = ""):
         spy_series = _extract_close("SPY")
         qqq_series = _extract_close("QQQ")
 
-        return JSONResponse({
+        payload = {
             "spy":        _to_ret_series(spy_series),
             "qqq":        _to_ret_series(qqq_series),
             "start_date": start,
             "updated":    end,
-        })
+        }
+        # 유효 데이터가 있을 때만 캐시 (일시적 조회 실패 캐싱 방지)
+        if payload["spy"] or payload["qqq"]:
+            if len(_BENCH_CACHE) > 32:      # 무한 증가 방지 (start 키 다양성 대비)
+                _BENCH_CACHE.clear()
+            _BENCH_CACHE[start] = (now_ts, payload)
+        return JSONResponse({**payload, "cached": False})
 
     except Exception as e:
         log.warning(f"/api/benchmark error: {e}")
