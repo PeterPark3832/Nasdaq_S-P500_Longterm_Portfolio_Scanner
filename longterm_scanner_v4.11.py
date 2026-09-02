@@ -1137,6 +1137,23 @@ def load_performance_history() -> list[dict]:
         return []
 
 
+def _finite(v, nd: int = 2) -> float | None:
+    """JSON 비호환 float(NaN/Infinity) -> None, 그 외에는 소수점 nd자리 반올림.
+
+    NaN이 성과 이력에 저장되면 json.loads는 통과하지만 대시보드의
+    JSONResponse(allow_nan=False)가 500을 내며 화면 전체가 죽는다.
+    """
+    if v is None:
+        return None
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    if v != v or v in (float("inf"), float("-inf")):   # NaN / Inf
+        return None
+    return round(v, nd)
+
+
 def save_performance_record(
     record_type: str,           # "rebalancing" | "performance_check"
     portfolio_ret_pct: float,
@@ -1149,15 +1166,18 @@ def save_performance_record(
     perf_history_keep 초과 시 오래된 것부터 삭제.
     """
     today_str = datetime.now(KST).strftime("%Y-%m-%d")
+    port_ret = _finite(portfolio_ret_pct)
+    spy_ret  = _finite(spy_ret_pct)
+    qqq_ret  = _finite(qqq_ret_pct)
     new_rec = {
         "date":              today_str,
         "month":             datetime.now(KST).strftime("%Y-%m"),
         "type":              record_type,
-        "portfolio_ret_pct": round(portfolio_ret_pct, 2),
-        "spy_ret_pct":       round(spy_ret_pct, 2) if spy_ret_pct is not None else None,
-        "qqq_ret_pct":       round(qqq_ret_pct, 2) if qqq_ret_pct is not None else None,
-        "alpha_vs_spy":      round(portfolio_ret_pct - spy_ret_pct, 2)
-                             if spy_ret_pct is not None else None,
+        "portfolio_ret_pct": port_ret,
+        "spy_ret_pct":       spy_ret,
+        "qqq_ret_pct":       qqq_ret,
+        "alpha_vs_spy":      round(port_ret - spy_ret, 2)
+                             if port_ret is not None and spy_ret is not None else None,
     }
     records = load_performance_history()
     # 같은 날 + 같은 type 제거 (재실행 시 덮어쓰기)
@@ -1171,7 +1191,8 @@ def save_performance_record(
             json.dumps({"records": records}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        log.info(f"  성과 이력 저장: {today_str} / 포트폴리오 {portfolio_ret_pct:+.2f}%")
+        _shown = f"{port_ret:+.2f}%" if port_ret is not None else "N/A (값 없음)"
+        log.info(f"  성과 이력 저장: {today_str} / 포트폴리오 {_shown}")
     except Exception as e:
         log.warning(f"성과 이력 저장 실패: {e}")
 
@@ -1301,8 +1322,13 @@ def build_performance_brief(portfolio: dict) -> str:
             continue
         cur_price = price_map.get(h["ticker"], h["entry_price"])
         stale     = h["ticker"] in stale_set
-        ret_pct   = (cur_price - h["entry_price"]) / h["entry_price"] * 100
-        rows.append({**h, "cur_price": cur_price, "ret_pct": round(ret_pct, 2), "stale": stale})
+        entry     = h["entry_price"]
+        # 상장폐지/거래정지 종목은 yfinance가 NaN 종가를 반환하기도 한다.
+        # 그대로 두면 weighted_ret 전체가 NaN이 되어 성과 이력이 오염된다.
+        if _finite(cur_price) is None or not _finite(entry):
+            cur_price, stale = entry, True
+        ret_pct   = (cur_price - entry) / entry * 100 if _finite(entry) else 0.0
+        rows.append({**h, "cur_price": cur_price, "ret_pct": _finite(ret_pct) or 0.0, "stale": stale})
 
     weighted_ret = sum(r["ret_pct"] * r["weight"] / 100 for r in rows)
     emoji_ret    = "📈" if weighted_ret >= 0 else "📉"
