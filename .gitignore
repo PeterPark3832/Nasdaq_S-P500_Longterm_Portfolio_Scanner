@@ -35,3 +35,11 @@ verify_restart.py
 # Generated runtime data
 rebalancing_changes.json
 portfolio_prev_us.json
+
+# 로컬 DB (사용자 이메일/비밀번호 해시 포함 — 공개 리포 커밋 금지)
+app.db
+app.db-shm
+app.db-wal
+
+# 시장 데이터 캐시 (대용량)
+lt_info_cache.json

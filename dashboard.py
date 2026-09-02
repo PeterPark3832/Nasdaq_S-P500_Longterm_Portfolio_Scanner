@@ -54,8 +54,22 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+def _sanitize(o):
+    """NaN/Infinity -> None.
+
+    json.loads는 파이썬 확장이라 bare NaN을 읽어들이지만, Starlette의
+    JSONResponse는 allow_nan=False로 덤프하므로 값 하나만 섞여도 응답이
+    500이 되고 대시보드 전체가 "데이터 로드 실패"로 죽는다.
+    (2026-08-31 performance_history.json의 portfolio_ret_pct=NaN 사고)
+    """
+    if isinstance(o, dict):  return {k: _sanitize(v) for k, v in o.items()}
+    if isinstance(o, list):  return [_sanitize(v) for v in o]
+    if isinstance(o, float) and (o != o or o in (float("inf"), float("-inf"))):
+        return None
+    return o
+
 def _load(fname):
-    try:    return json.loads((BASE / fname).read_text())
+    try:    return _sanitize(json.loads((BASE / fname).read_text(encoding="utf-8")))
     except: return None
 
 @app.get("/api/data")
@@ -1233,13 +1247,16 @@ async function load(){
       fetch('/api/data?token='+TK),
       fetch('/api/benchmark?token='+TK),
     ]);
-    if(!rD.ok)throw new Error('data');
+    if(!rD.ok)throw new Error('/api/data → HTTP '+rD.status);
     D=await rD.json();
     if(rB.ok){try{BM=await rB.json();}catch{}}
     render();
-  }catch{
+  }catch(e){
+    const msg=String((e&&e.message)||e)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     document.querySelector('.main').innerHTML=
-      '<div style="text-align:center;padding:80px;color:var(--rd)">데이터 로드 실패</div>';
+      '<div style="text-align:center;padding:80px;color:var(--rd)">데이터 로드 실패'
+      +'<div style="margin-top:10px;font-size:12px;color:var(--mu)">'+msg+'</div></div>';
   }
 }
 
